@@ -1,0 +1,27 @@
+["2022"]
+income_czk = 500000
+mortgage_interest_paid_czk = 0
+donations_paid_czk = 30000
+child_months_by_order = []
+spouse_allowance = false
+
+["2023"]
+income_czk = 550000
+mortgage_interest_paid_czk = 100000
+donations_paid_czk = 10000
+child_months_by_order = [6]
+spouse_allowance = false
+
+["2024"]
+income_czk = 600000
+mortgage_interest_paid_czk = 150000
+donations_paid_czk = 0
+child_months_by_order = [12]
+spouse_allowance = true
+
+["2025"]
+income_czk = 650000
+mortgage_interest_paid_czk = 150000
+donations_paid_czk = 0
+child_months_by_order = [12]
+spouse_allowance = true
