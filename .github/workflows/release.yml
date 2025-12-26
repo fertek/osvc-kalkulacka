@@ -31,10 +31,10 @@ jobs:
         run: uv build
 
       - name: Smoke test (wheel)
-        run: uv run --isolated --no-project --with pytest --with build --with dist/*.whl pytest -q tests/test_smoke_packaging.py
+        run: uv run --isolated --no-project --with pytest --with build --with pip --with dist/*.whl pytest -q tests/test_smoke_packaging.py
 
       - name: Smoke test (source distribution)
-        run: uv run --isolated --no-project --with pytest --with build --with dist/*.tar.gz pytest -q tests/test_smoke_packaging.py
+        run: uv run --isolated --no-project --with pytest --with build --with pip --with dist/*.tar.gz pytest -q tests/test_smoke_packaging.py
 
       - name: Publish to PyPI (Trusted Publishing)
         run: uv publish --trusted-publishing always
