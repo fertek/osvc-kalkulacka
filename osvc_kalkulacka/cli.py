@@ -11,9 +11,7 @@ from osvc_kalkulacka.core import (
     D,
     Inputs,
     USER_DEFAULTS,
-    ceil_czk,
     compute,
-    round_czk_half_up,
 )
 
 
@@ -105,6 +103,24 @@ def _ensure_decimal_0_1(value: object, *, name: str, year: int) -> D:
     if not (D("0") <= dec <= D("1")):
         raise SystemExit(f"Rok {year}: {name} musí být v intervalu 0.0–1.0.")
     return dec
+
+
+def _ensure_bool(value: object, *, name: str, year: int) -> bool:
+    if not isinstance(value, bool):
+        raise SystemExit(f"Rok {year}: {name} musí být true/false.")
+    return value
+
+
+def _ensure_child_months(value: object, *, year: int) -> tuple[int, ...]:
+    if not isinstance(value, list):
+        raise SystemExit(f"Rok {year}: child_months_by_order musí být seznam čísel.")
+    months: list[int] = []
+    for idx, item in enumerate(value, start=1):
+        month = _ensure_int(item, name="child_months_by_order", year=year)
+        if not 0 <= month <= 12:
+            raise SystemExit(f"Rok {year}: child_months_by_order[{idx}] musí být 0–12.")
+        months.append(month)
+    return tuple(months)
 
 
 def load_year_defaults(path: str | None, user_dir: str) -> dict[int, dict[str, object]]:
@@ -213,8 +229,6 @@ def _results_as_dict(inp: Inputs, res) -> dict[str, object]:
             "sp_vym_base_share": str(inp.sp_vym_base_share),
             "zp_min_base_share": str(inp.zp_min_base_share),
             "sp_min_base_share": str(inp.sp_min_base_share),
-            "min_zp_monthly_czk": inp.min_zp_monthly_czk,
-            "min_sp_monthly_czk": inp.min_sp_monthly_czk,
         },
         "tax": {
             "expenses_czk": res.tax.expenses_czk,
@@ -299,7 +313,10 @@ def cli() -> None:
     "--donations",
     type=int,
     default=None,
-    help="Součet darů za rok (§15) v Kč (uplatní se jen pokud součet >= max(2 % základu, 1 000 Kč)).",
+    help=(
+        "Součet darů za rok (§15) v Kč. Uplatní se, pokud je splněna alespoň jedna podmínka: "
+        "součet >= 2 % základu daně nebo součet >= 1 000 Kč (tj. práh min(2 % základu, 1 000 Kč))."
+    ),
 )
 @click.option(
     "--child-months-by-order",
@@ -343,28 +360,38 @@ def calc(
 
     year_presets = load_year_presets(presets, user_dir)
     preset = year_presets.get(year, {})
-    income_czk = income if income is not None else preset.get("income_czk")
-    if income_czk is None:
-        raise SystemExit("Chybí příjmy. Zadej --income nebo doplň preset pro daný rok.")
+    if income is not None:
+        income_czk = income
+    else:
+        preset_income = preset.get("income_czk")
+        if preset_income is None:
+            raise SystemExit("Chybí příjmy. Zadej --income nebo doplň preset pro daný rok.")
+        income_czk = _ensure_int(preset_income, name="income_czk", year=year)
 
-    mortgage_interest_paid_czk = (
-        mortgage_interest_paid
-        if mortgage_interest_paid is not None
-        else preset.get("mortgage_interest_paid_czk", 0)
-    )
-    donations_paid_czk = (
-        donations
-        if donations is not None
-        else preset.get("donations_paid_czk", 0)
-    )
+    if mortgage_interest_paid is not None:
+        mortgage_interest_paid_czk = mortgage_interest_paid
+    else:
+        mortgage_interest_paid_czk = _ensure_int(
+            preset.get("mortgage_interest_paid_czk", 0),
+            name="mortgage_interest_paid_czk",
+            year=year,
+        )
+    if donations is not None:
+        donations_paid_czk = donations
+    else:
+        donations_paid_czk = _ensure_int(
+            preset.get("donations_paid_czk", 0),
+            name="donations_paid_czk",
+            year=year,
+        )
     child_months_by_order_tuple = None
     if child_months_by_order:
         child_months_by_order_tuple = _parse_child_months(child_months_by_order)
     elif "child_months_by_order" in preset:
-        preset_months = preset.get("child_months_by_order") or []
-        if not isinstance(preset_months, list):
-            raise SystemExit("Preset: child_months_by_order musí být seznam čísel.")
-        child_months_by_order_tuple = tuple(int(item) for item in preset_months)
+        child_months_by_order_tuple = _ensure_child_months(
+            preset.get("child_months_by_order"),
+            year=year,
+        )
 
     if child_months_by_order_tuple is None:
         raise SystemExit("Chybí child_months_by_order. Zadej --child-months-by-order nebo nastav preset.")
@@ -373,15 +400,10 @@ def calc(
     elif spouse_allowance is False:
         spouse_allowance = False
     else:
-        spouse_allowance = preset.get("spouse_allowance", False)
-
-    # Vypočet minimální měsíční zálohy z ročního minima (ceiling na roční, měsíční zaokrouhleno matematicky).
-    zp_annual_min_default = ceil_czk(D(year_cfg["avg_wage_czk"]) * D("0.50") * D("0.135") * D("12"))
-    sp_annual_min_default = ceil_czk(
-        D(year_cfg["avg_wage_czk"]) * year_cfg["sp_min_base_share"] * D("0.292") * D("12")
-    )
-    min_zp_monthly_default = round_czk_half_up(D(zp_annual_min_default) / D("12"))
-    min_sp_monthly_default = round_czk_half_up(D(sp_annual_min_default) / D("12"))
+        if "spouse_allowance" in preset:
+            spouse_allowance = _ensure_bool(preset.get("spouse_allowance"), name="spouse_allowance", year=year)
+        else:
+            spouse_allowance = False
 
     inp = Inputs(
         income_czk=income_czk,
@@ -399,8 +421,6 @@ def calc(
         spouse_allowance_czk=year_cfg["spouse_allowance"] if spouse_allowance else 0,
         child_bonus_annual_tiers_czk=year_cfg["child_bonus_annual_tiers"],
         avg_wage_czk=year_cfg["avg_wage_czk"],
-        min_zp_monthly_czk=min_zp_monthly_default,
-        min_sp_monthly_czk=min_sp_monthly_default,
         zp_min_base_share=D("0.50"),
         sp_min_base_share=year_cfg["sp_min_base_share"],
         sp_vym_base_share=year_cfg["sp_vym_base_share"],

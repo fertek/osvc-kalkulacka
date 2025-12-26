@@ -88,10 +88,6 @@ class Inputs:
     zp_min_base_share: Decimal = D("0.50")
     sp_min_base_share: Decimal = D("0.35")
 
-    # minima (defaulty typicky pro daný rok)
-    min_zp_monthly_czk: int = 3_143
-    min_sp_monthly_czk: int = 4_759
-
 
 @dataclass(frozen=True)
 class TaxResults:

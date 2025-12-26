@@ -1,6 +1,7 @@
 import os
 
 import pytest
+from click.testing import CliRunner
 
 from osvc_kalkulacka import cli
 
@@ -116,3 +117,33 @@ def test_load_year_presets_missing(tmp_path, monkeypatch):
     with pytest.raises(SystemExit) as excinfo:
         cli.load_year_presets(None, str(tmp_path))
     assert "osvc init" in str(excinfo.value)
+
+
+def test_preset_invalid_spouse_allowance_raises(tmp_path, monkeypatch):
+    year = 2033
+    defaults_path = tmp_path / "defaults.toml"
+    presets_path = tmp_path / "year_presets.toml"
+
+    _write_toml(defaults_path, _defaults_toml(year, 111))
+    _write_toml(
+        presets_path,
+        "\n".join(
+            [
+                f'["{year}"]',
+                "income_czk = 1000",
+                "child_months_by_order = [12]",
+                'spouse_allowance = "yes"',
+                "",
+            ]
+        ),
+    )
+
+    monkeypatch.setenv("OSVC_USER_PATH", str(tmp_path))
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli.cli,
+        ["calc", "--year", str(year), "--defaults", str(defaults_path), "--format", "json"],
+    )
+    assert result.exit_code != 0
+    assert "spouse_allowance" in result.output
