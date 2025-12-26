@@ -48,5 +48,7 @@ include = [
 
 [dependency-groups]
 dev = [
+    "build",
+    "pip",
     "pytest",
 ]
