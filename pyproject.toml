@@ -1,6 +1,6 @@
 [project]
 name = "osvc-kalkulacka"
-version = "0.3.0"
+version = "0.3.1"
 description = "OSVČ kalkulačka (DPFO + ZP/SP)"
 readme = "README.md"
 requires-python = ">=3.11"
