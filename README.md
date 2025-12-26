@@ -1,5 +1,22 @@
 # OSVČ kalkulačka (DPFO + ZP/SP)
 
+OSVČ kalkulačka spočítá daň z příjmu fyzických osob a zálohy na zdravotní i sociální pojištění.
+
+## Proč další kalkulačka?
+
+Podobné kalkulačky:
+
+- https://www.kalkulackaosvc.cz
+- https://www.kurzy.cz/kalkulacka/kalkulacka-osvc.htm
+- https://www.penize.cz/kalkulacky/danova-kalkulacka-osvc
+- https://martinmatousek.github.io/kpp/
+
+1) Nevyplňuješ znovu to samé
+Kalkulačku můžeš používat z příkazové řádky nebo přes jednoduchý konfigurační soubor. Jednou zadané údaje si pamatuje a zůstávají bezpečně uložené jen u tebe v počítači.
+
+2) Pracuje s více roky
+Umí počítat pro různé roky a snadno porovnat výsledky mezi nimi, ne jen aktuální období.
+
 ## Instalace
 
 ```bash
@@ -37,10 +54,10 @@ osvc init
 ```
 
 ```bash
-~/.config/cz.janfertek.osvc-kalkulacka/year_presets.toml
+~/.config/osvc-kalkulacka/year_presets.toml
 ```
 
-2) Doplň `year_presets.toml` (příjmy, děti, dary…). Minimálně potřebuješ `income_czk` pro daný rok. Výchozí cesta je `~/.config/cz.janfertek.osvc-kalkulacka/year_presets.toml` a ověříš ji přes `osvc config path`.
+2) Doplň `year_presets.toml` (příjmy, děti, dary…). Minimálně potřebuješ `income_czk` pro daný rok. Výchozí cesta je `~/.config/osvc-kalkulacka/year_presets.toml` a ověříš ji přes `osvc config path`.
 
 Příklad obsahu:
 
@@ -58,7 +75,7 @@ Hodnota `child_months_by_order` je seznam měsíců nároku podle pořadí dít�
 3) Volitelně přepiš výchozí tabulky, pokud potřebuješ vlastní parametry:
 
 ```text
-nano ~/.config/cz.janfertek.osvc-kalkulacka/year_defaults.override.toml
+nano ~/.config/osvc-kalkulacka/year_defaults.override.toml
 ```
 
 4) Spusť výpočet jen s `--year`, pokud máš v předvolbách vše potřebné:
@@ -92,8 +109,8 @@ Poznámka: výchozí adresář lze změnit přes `OSVC_USER_PATH`. Cesty k prese
 Očekávané soubory:
 
 ```text
-~/.config/cz.janfertek.osvc-kalkulacka/year_presets.toml
-~/.config/cz.janfertek.osvc-kalkulacka/year_defaults.override.toml
+~/.config/osvc-kalkulacka/year_presets.toml
+~/.config/osvc-kalkulacka/year_defaults.override.toml
 ```
 
 ## Pořadí zdrojů
@@ -103,12 +120,12 @@ Vlastní čísla, která zadáváš každý rok (příjmy, dary, děti). Slouž�
 
 Priorita je shora dolů (první nalezená cesta vyhrává).
 
-Příklad: pokud nastavíš `OSVC_PRESETS_PATH`, přebije soubor v `~/.config/cz.janfertek.osvc-kalkulacka/year_presets.toml`.
+Příklad: pokud nastavíš `OSVC_PRESETS_PATH`, přebije soubor v `~/.config/osvc-kalkulacka/year_presets.toml`.
 
 ```text
 osvc --presets ./my_year_presets.toml --year 2025
 OSVC_PRESETS_PATH=./my_year_presets.toml osvc --year 2025
-~/.config/cz.janfertek.osvc-kalkulacka/year_presets.toml
+~/.config/osvc-kalkulacka/year_presets.toml
 ```
 
 Výchozí tabulky (parametry pro výpočet):
@@ -116,12 +133,12 @@ Oficiální roční parametry (průměrná/minimální mzda, slevy, sazby). Bez 
 
 Priorita je shora dolů (první nalezená cesta vyhrává).
 
-Příklad: pokud nastavíš `OSVC_DEFAULTS_PATH`, přebije `~/.config/cz.janfertek.osvc-kalkulacka/year_defaults.override.toml` i vestavěný soubor.
+Příklad: pokud nastavíš `OSVC_DEFAULTS_PATH`, přebije `~/.config/osvc-kalkulacka/year_defaults.override.toml` i vestavěný soubor.
 
 ```text
 osvc --defaults ./my_year_defaults.toml --year 2025
 OSVC_DEFAULTS_PATH=./my_year_defaults.toml osvc --year 2025
-~/.config/cz.janfertek.osvc-kalkulacka/year_defaults.override.toml (pokud existuje)
+~/.config/osvc-kalkulacka/year_defaults.override.toml (pokud existuje)
 vestavěné year_defaults.toml
 ```
 

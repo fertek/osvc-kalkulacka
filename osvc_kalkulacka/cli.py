@@ -40,7 +40,7 @@ def get_user_dir() -> str:
     env_path = os.getenv("OSVC_USER_PATH")
     if env_path:
         return env_path
-    return click.get_app_dir("cz.janfertek.osvc-kalkulacka")
+    return click.get_app_dir("osvc-kalkulacka")
 
 
 def _load_toml(path: str) -> dict[str, object]:

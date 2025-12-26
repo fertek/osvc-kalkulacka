@@ -35,5 +35,5 @@
 
 ## Configuration & Data
 
-- User overrides are read from `~/.config/cz.janfertek.osvc-kalkulacka/year_presets.toml` and `~/.config/cz.janfertek.osvc-kalkulacka/year_defaults.override.toml` by default.
+- User overrides are read from `~/.config/osvc-kalkulacka/year_presets.toml` and `~/.config/osvc-kalkulacka/year_defaults.override.toml` by default.
 - Environment variables `OSVC_PRESETS_PATH` and `OSVC_DEFAULTS_PATH` can override these locations; `OSVC_USER_PATH` changes the base user directory (see `osvc config path`).
