@@ -4,6 +4,9 @@ import sys
 from importlib import resources
 from pathlib import Path
 
+import pytest
+
+pytest.importorskip("build", reason="Packaging smoke tests require the 'build' module.")
 
 def test_package_importable() -> None:
     __import__("osvc_kalkulacka")
