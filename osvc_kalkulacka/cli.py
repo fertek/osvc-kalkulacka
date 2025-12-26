@@ -256,7 +256,14 @@ class DefaultGroup(click.Group):
         self.default_command = default_command
 
     def parse_args(self, ctx: click.Context, args: list[str]) -> list[str]:
-        if self.default_command and (not args or args[0] not in self.commands):
+        if self.default_command and (
+            not args
+            or (
+                args[0].startswith("-")
+                and args[0] not in {"-h", "--help", "--version"}
+            )
+            or (not args[0].startswith("-") and args[0] not in self.commands)
+        ):
             args.insert(0, self.default_command)
         return super().parse_args(ctx, args)
 
