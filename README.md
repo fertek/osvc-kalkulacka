@@ -37,15 +37,28 @@ osvc init
 ```
 
 ```bash
-${USER_DIR}/year_presets.toml
+~/.config/cz.janfertek.osvc-kalkulacka/year_presets.toml
 ```
 
-2) Doplň `year_presets.toml` (příjmy, děti, dary…). Minimálně potřebuješ `income_czk` pro daný rok.
+2) Doplň `year_presets.toml` (příjmy, děti, dary…). Minimálně potřebuješ `income_czk` pro daný rok. Výchozí cesta je `~/.config/cz.janfertek.osvc-kalkulacka/year_presets.toml` a ověříš ji přes `osvc config path`.
+
+Příklad obsahu:
+
+```toml
+["2025"]
+income_czk = 650000
+mortgage_interest_paid_czk = 150000
+donations_paid_czk = 0
+child_months_by_order = [6, 12]
+spouse_allowance = true
+```
+
+Hodnota `child_months_by_order` je seznam měsíců nároku podle pořadí dítěte (1., 2., 3+). Zápis `child_months_by_order = [6, 12]` znamená 1. dítě 6 měsíců, 2. dítě 12 měsíců.
 
 3) Volitelně přepiš výchozí tabulky, pokud potřebuješ vlastní parametry:
 
 ```text
-${USER_DIR}/year_defaults.override.toml
+nano ~/.config/cz.janfertek.osvc-kalkulacka/year_defaults.override.toml
 ```
 
 4) Spusť výpočet jen s `--year`, pokud máš v předvolbách vše potřebné:
@@ -74,11 +87,13 @@ Zobrazení cest:
 osvc config path
 ```
 
+Poznámka: výchozí adresář lze změnit přes `OSVC_USER_PATH`. Cesty k presetům/defaultům můžeš přepsat přes `OSVC_PRESETS_PATH` a `OSVC_DEFAULTS_PATH`.
+
 Očekávané soubory:
 
 ```text
-${USER_DIR}/year_presets.toml
-${USER_DIR}/year_defaults.override.toml
+~/.config/cz.janfertek.osvc-kalkulacka/year_presets.toml
+~/.config/cz.janfertek.osvc-kalkulacka/year_defaults.override.toml
 ```
 
 ## Pořadí zdrojů
@@ -86,23 +101,31 @@ ${USER_DIR}/year_defaults.override.toml
 Předvolby (roční vstupy):
 Vlastní čísla, která zadáváš každý rok (příjmy, dary, děti). Slouží jako výchozí hodnoty pro výpočet.
 
+Priorita je shora dolů (první nalezená cesta vyhrává).
+
+Příklad: pokud nastavíš `OSVC_PRESETS_PATH`, přebije soubor v `~/.config/cz.janfertek.osvc-kalkulacka/year_presets.toml`.
+
 ```text
---presets
-OSVC_PRESETS_PATH
-${USER_DIR}/year_presets.toml
+osvc --presets ./my_year_presets.toml --year 2025
+OSVC_PRESETS_PATH=./my_year_presets.toml osvc --year 2025
+~/.config/cz.janfertek.osvc-kalkulacka/year_presets.toml
 ```
 
 Výchozí tabulky (parametry pro výpočet):
 Oficiální roční parametry (průměrná/minimální mzda, slevy, sazby). Bez nich výpočet neběží.
 
+Priorita je shora dolů (první nalezená cesta vyhrává).
+
+Příklad: pokud nastavíš `OSVC_DEFAULTS_PATH`, přebije `~/.config/cz.janfertek.osvc-kalkulacka/year_defaults.override.toml` i vestavěný soubor.
+
 ```text
---defaults
-OSVC_DEFAULTS_PATH
-${USER_DIR}/year_defaults.override.toml (pokud existuje)
+osvc --defaults ./my_year_defaults.toml --year 2025
+OSVC_DEFAULTS_PATH=./my_year_defaults.toml osvc --year 2025
+~/.config/cz.janfertek.osvc-kalkulacka/year_defaults.override.toml (pokud existuje)
 vestavěné year_defaults.toml
 ```
 
-## Export vestavěných tabulek
+Export vestavěných tabulek do souboru:
 
 ```bash
 osvc defaults dump --output year_defaults.toml
