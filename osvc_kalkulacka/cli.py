@@ -212,12 +212,7 @@ def _results_as_dict(inp: Inputs, res) -> dict[str, object]:
             "child_months_by_order": list(inp.child_months_by_order),
             "min_wage_czk": inp.min_wage_czk,
             "expense_rate": str(inp.expense_rate),
-            "mortgage_interest_paid_czk": inp.mortgage_interest_paid_czk,
-            "mortgage_interest_limit_czk": inp.mortgage_interest_limit_czk,
-            "donations_paid_czk": inp.donations_paid_czk,
-            "donation_max_pct": str(inp.donation_max_pct),
-            "donation_min_pct": str(inp.donation_min_pct),
-            "donation_min_czk": inp.donation_min_czk,
+            "section_15_allowances_czk": inp.section_15_allowances_czk,
             "tax_rate": str(inp.tax_rate),
             "taxpayer_credit_czk": inp.taxpayer_credit_czk,
             "spouse_allowance_czk": inp.spouse_allowance_czk,
@@ -233,9 +228,7 @@ def _results_as_dict(inp: Inputs, res) -> dict[str, object]:
         "tax": {
             "expenses_czk": res.tax.expenses_czk,
             "base_profit_czk": res.tax.base_profit_czk,
-            "deductible_interest_czk": res.tax.deductible_interest_czk,
-            "donations_paid_czk": res.tax.donations_paid_czk,
-            "donations_deductible_czk": res.tax.donations_deductible_czk,
+            "section_15_allowances_czk": res.tax.section_15_allowances_czk,
             "base_after_deductions_czk": res.tax.base_after_deductions_czk,
             "base_rounded_czk": res.tax.base_rounded_czk,
             "tax_before_credits_czk": res.tax.tax_before_credits_czk,
@@ -304,19 +297,10 @@ def cli() -> None:
     help="Cesta k TOML s ročními tabulkami. Alternativně lze použít OSVC_DEFAULTS_PATH.",
 )
 @click.option(
-    "--mortgage-interest-paid",
+    "--section-15-allowances",
     type=int,
     default=None,
-    help="Zaplacené úroky z hypotéky za rok (§15) v Kč (pro smlouvy sjednané od 1. 1. 2021 platí limit 150 000 Kč ročně).",
-)
-@click.option(
-    "--donations",
-    type=int,
-    default=None,
-    help=(
-        "Součet darů za rok (§15) v Kč. Uplatní se, pokud je splněna alespoň jedna podmínka: "
-        "součet >= 2 % základu daně nebo součet >= 1 000 Kč (tj. práh min(2 % základu, 1 000 Kč))."
-    ),
+    help="Nezdanitelné části základu daně (§15) v Kč za rok.",
 )
 @click.option(
     "--child-months-by-order",
@@ -342,8 +326,7 @@ def calc(
     income: int | None,
     presets: str | None,
     defaults: str | None,
-    mortgage_interest_paid: int | None,
-    donations: int | None,
+    section_15_allowances: int | None,
     child_months_by_order: str | None,
     spouse_allowance: bool | None,
     output_format: str,
@@ -368,20 +351,12 @@ def calc(
             raise SystemExit("Chybí příjmy. Zadej --income nebo doplň preset pro daný rok.")
         income_czk = _ensure_int(preset_income, name="income_czk", year=year)
 
-    if mortgage_interest_paid is not None:
-        mortgage_interest_paid_czk = mortgage_interest_paid
+    if section_15_allowances is not None:
+        section_15_allowances_czk = section_15_allowances
     else:
-        mortgage_interest_paid_czk = _ensure_int(
-            preset.get("mortgage_interest_paid_czk", 0),
-            name="mortgage_interest_paid_czk",
-            year=year,
-        )
-    if donations is not None:
-        donations_paid_czk = donations
-    else:
-        donations_paid_czk = _ensure_int(
-            preset.get("donations_paid_czk", 0),
-            name="donations_paid_czk",
+        section_15_allowances_czk = _ensure_int(
+            preset.get("section_15_allowances_czk", 0),
+            name="section_15_allowances_czk",
             year=year,
         )
     child_months_by_order_tuple = None
@@ -410,12 +385,7 @@ def calc(
         child_months_by_order=child_months_by_order_tuple,
         min_wage_czk=year_cfg["min_wage_czk"],
         expense_rate=USER_DEFAULTS["expense_rate"],
-        mortgage_interest_paid_czk=mortgage_interest_paid_czk,
-        mortgage_interest_limit_czk=USER_DEFAULTS["mortgage_interest_limit"],
-        donations_paid_czk=donations_paid_czk,
-        donation_max_pct=USER_DEFAULTS["donation_max_pct"],
-        donation_min_pct=USER_DEFAULTS["donation_min_pct"],
-        donation_min_czk=USER_DEFAULTS["donation_min_czk"],
+        section_15_allowances_czk=section_15_allowances_czk,
         tax_rate=USER_DEFAULTS["tax_rate"],
         taxpayer_credit_czk=year_cfg["taxpayer_credit"],
         spouse_allowance_czk=year_cfg["spouse_allowance"] if spouse_allowance else 0,
@@ -440,16 +410,8 @@ def calc(
     print_row(f"Výdaje paušálem ({(inp.expense_rate * 100)}%):", res.tax.expenses_czk)
     print_row("Zisk / základ (§7):", res.tax.base_profit_czk)
     print()
-    print_row_text(
-        "Úroky zaplacené / limit:",
-        f"{fmt(inp.mortgage_interest_paid_czk)} / {fmt(inp.mortgage_interest_limit_czk)} Kč",
-    )
-    print_row("Úroky uplatněno:", res.tax.deductible_interest_czk)
-    print_row_text(
-        "Dary zaplacené / uplatněno:",
-        f"{fmt(res.tax.donations_paid_czk)} / {fmt(res.tax.donations_deductible_czk)} Kč",
-    )
-    print_row("Základ po odpočtu úroků a darů:", res.tax.base_after_deductions_czk)
+    print_row("Nezdanitelné části základu daně (§15):", res.tax.section_15_allowances_czk)
+    print_row("Základ po odpočtu §15:", res.tax.base_after_deductions_czk)
     print_row("Základ daně zaokrouhlený:", res.tax.base_rounded_czk)
     print()
     print_row("Daň z příjmů před odečtením slev:", res.tax.tax_before_credits_czk)

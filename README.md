@@ -57,15 +57,14 @@ osvc init
 ~/.config/osvc-kalkulacka/year_presets.toml
 ```
 
-2) Doplň `year_presets.toml` (příjmy, děti, dary…). Minimálně potřebuješ `income_czk` pro daný rok. Výchozí cesta je `~/.config/osvc-kalkulacka/year_presets.toml` a ověříš ji přes `osvc config path`.
+2) Doplň `year_presets.toml` (příjmy, děti, nezdanitelné části…). Minimálně potřebuješ `income_czk` pro daný rok. Výchozí cesta je `~/.config/osvc-kalkulacka/year_presets.toml` a ověříš ji přes `osvc config path`.
 
 Příklad obsahu:
 
 ```toml
 ["2025"]
 income_czk = 650000
-mortgage_interest_paid_czk = 150000
-donations_paid_czk = 0
+section_15_allowances_czk = 150000
 child_months_by_order = [6, 12]
 spouse_allowance = true
 ```

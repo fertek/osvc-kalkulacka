@@ -6,13 +6,8 @@ from decimal import Decimal, ROUND_HALF_UP, ROUND_CEILING
 D = Decimal
 
 USER_DEFAULTS = {
-    "mortgage_interest_limit": 150_000,
     "tax_rate": D("0.15"),
     "expense_rate": D("0.60"),
-    # Zjednodušení: limit darů vždy 30 % základu daně (platí pro roky 2022–2026).
-    "donation_max_pct": D("0.30"),
-    "donation_min_pct": D("0.02"),
-    "donation_min_czk": 1_000,
 }
 
 
@@ -63,13 +58,8 @@ class Inputs:
     min_wage_czk: int
     expense_rate: Decimal = D("0.60")
 
-    # §15 - úroky
-    mortgage_interest_paid_czk: int = 0
-    mortgage_interest_limit_czk: int = 150_000
-    donations_paid_czk: int = 0
-    donation_max_pct: Decimal = D("0.30")
-    donation_min_pct: Decimal = D("0.02")
-    donation_min_czk: int = 1_000
+    # §15 - nezdanitelné části základu daně
+    section_15_allowances_czk: int = 0
 
     # DPFO
     tax_rate: Decimal = D("0.15")
@@ -93,9 +83,7 @@ class Inputs:
 class TaxResults:
     expenses_czk: int
     base_profit_czk: int
-    deductible_interest_czk: int
-    donations_paid_czk: int
-    donations_deductible_czk: int
+    section_15_allowances_czk: int
     base_after_deductions_czk: int
     base_rounded_czk: int
     tax_before_credits_czk: int
@@ -135,10 +123,7 @@ class Results:
 
 def compute_tax(inp: Inputs) -> TaxResults:
     nonneg_int("income_czk", inp.income_czk)
-    nonneg_int("mortgage_interest_paid_czk", inp.mortgage_interest_paid_czk)
-    nonneg_int("mortgage_interest_limit_czk", inp.mortgage_interest_limit_czk)
-    nonneg_int("donations_paid_czk", inp.donations_paid_czk)
-    nonneg_int("donation_min_czk", inp.donation_min_czk)
+    nonneg_int("section_15_allowances_czk", inp.section_15_allowances_czk)
     nonneg_int("taxpayer_credit_czk", inp.taxpayer_credit_czk)
     nonneg_int("spouse_allowance_czk", inp.spouse_allowance_czk)
 
@@ -148,24 +133,12 @@ def compute_tax(inp: Inputs) -> TaxResults:
         nonneg_int(f"child_bonus_tier_{idx}_czk", amount)
     validate_rate_0_1("expense_rate", inp.expense_rate)
     validate_rate_0_1("tax_rate", inp.tax_rate)
-    validate_rate_0_1("donation_max_pct", inp.donation_max_pct)
-    validate_rate_0_1("donation_min_pct", inp.donation_min_pct)
 
     expenses = round_czk_half_up(D(inp.income_czk) * inp.expense_rate)
     base_profit = inp.income_czk - expenses
     base_profit = max(0, base_profit)
 
-    deductible_interest = min(inp.mortgage_interest_paid_czk, inp.mortgage_interest_limit_czk, base_profit)
-    donation_threshold = min(
-        inp.donation_min_czk,
-        round_czk_half_up(D(base_profit) * inp.donation_min_pct),
-    )
-    donation_limit = round_czk_half_up(D(base_profit) * inp.donation_max_pct)
-    donations_deductible = 0
-    if inp.donations_paid_czk >= donation_threshold:
-        donations_deductible = min(inp.donations_paid_czk, donation_limit)
-
-    base_after = max(0, base_profit - deductible_interest - donations_deductible)
+    base_after = max(0, base_profit - inp.section_15_allowances_czk)
 
     base_rounded = floor_to_hundreds(base_after)
     tax_before = round_czk_half_up(D(base_rounded) * inp.tax_rate)
@@ -191,9 +164,7 @@ def compute_tax(inp: Inputs) -> TaxResults:
     return TaxResults(
         expenses_czk=expenses,
         base_profit_czk=base_profit,
-        deductible_interest_czk=deductible_interest,
-        donations_paid_czk=inp.donations_paid_czk,
-        donations_deductible_czk=donations_deductible,
+        section_15_allowances_czk=inp.section_15_allowances_czk,
         base_after_deductions_czk=base_after,
         base_rounded_czk=base_rounded,
         tax_before_credits_czk=tax_before,
