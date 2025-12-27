@@ -19,6 +19,8 @@ Umí počítat pro různé roky a snadno porovnat výsledky mezi nimi, ne jen ak
 
 ## Instalace
 
+PyPI: https://pypi.org/project/osvc-kalkulacka/
+
 ```bash
 pip install osvc-kalkulacka
 ```
@@ -89,10 +91,12 @@ osvc --year 2025
 osvc --year 2025 --income 800000 --child-months-by-order 12
 ```
 
-Alternativně explicitně:
+## Ověření s EPO XML
+
+Pokud máš export XML z EPO (DPFDP6/DPFDP7) z https://adisspr.mfcr.cz/pmd/epo/formulare, můžeš ověřit, že kalkulačka vyšla stejně jako podané přiznání.
 
 ```bash
-osvc calc --year 2025 --income 800000 --child-months-by-order 12
+osvc verify --epo ./dpfo_2024.xml --year 2024
 ```
 
 ## Přehled příkazů

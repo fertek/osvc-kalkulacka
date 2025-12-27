@@ -25,7 +25,6 @@ def test_cli_help_runs() -> None:
         text=True,
     )
     assert "osvc" in result.stdout
-    assert "calc" in result.stdout
 
 
 def _build_dist(dist_dir: Path, kind: str) -> None:
@@ -55,7 +54,6 @@ def _install_and_check(dist_path: Path, tmp_path: Path) -> None:
         env=env,
     )
     assert "osvc" in result.stdout
-    assert "calc" in result.stdout
 
 
 def test_sdist_install_and_cli_works(tmp_path: Path) -> None:

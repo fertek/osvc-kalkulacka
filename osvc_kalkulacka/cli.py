@@ -13,6 +13,7 @@ from osvc_kalkulacka.core import (
     USER_DEFAULTS,
     compute,
 )
+from osvc_kalkulacka.epo import compare_epo_to_calc, parse_epo_xml
 
 
 def fmt(n: int) -> str:
@@ -123,6 +124,82 @@ def _ensure_child_months(value: object, *, year: int) -> tuple[int, ...]:
     return tuple(months)
 
 
+def _build_inputs(
+    *,
+    year: int,
+    income: int | None,
+    presets: str | None,
+    defaults: str | None,
+    section_15_allowances: int | None,
+    child_months_by_order: str | None,
+    spouse_allowance: bool | None,
+) -> Inputs:
+    user_dir = get_user_dir()
+
+    year_defaults = load_year_defaults(defaults, user_dir)
+    year_cfg = year_defaults.get(year)
+    if year_cfg is None:
+        known_years = ", ".join(str(y) for y in sorted(year_defaults))
+        raise SystemExit(f"Neznám daňové parametry pro rok {year}. Známé roky: {known_years}")
+    if year_cfg["min_wage_czk"] <= 0:
+        raise SystemExit(f"Chybí min_wage_czk pro rok {year}. Doplň year_defaults.toml.")
+
+    year_presets = load_year_presets(presets, user_dir)
+    preset = year_presets.get(year, {})
+    if income is not None:
+        income_czk = income
+    else:
+        preset_income = preset.get("income_czk")
+        if preset_income is None:
+            raise SystemExit("Chybí příjmy. Zadej --income nebo doplň preset pro daný rok.")
+        income_czk = _ensure_int(preset_income, name="income_czk", year=year)
+
+    if section_15_allowances is not None:
+        section_15_allowances_czk = section_15_allowances
+    else:
+        section_15_allowances_czk = _ensure_int(
+            preset.get("section_15_allowances_czk", 0),
+            name="section_15_allowances_czk",
+            year=year,
+        )
+    child_months_by_order_tuple = None
+    if child_months_by_order:
+        child_months_by_order_tuple = _parse_child_months(child_months_by_order)
+    elif "child_months_by_order" in preset:
+        child_months_by_order_tuple = _ensure_child_months(
+            preset.get("child_months_by_order"),
+            year=year,
+        )
+
+    if child_months_by_order_tuple is None:
+        raise SystemExit("Chybí child_months_by_order. Zadej --child-months-by-order nebo nastav preset.")
+    if spouse_allowance is True:
+        spouse_allowance = True
+    elif spouse_allowance is False:
+        spouse_allowance = False
+    else:
+        if "spouse_allowance" in preset:
+            spouse_allowance = _ensure_bool(preset.get("spouse_allowance"), name="spouse_allowance", year=year)
+        else:
+            spouse_allowance = False
+
+    return Inputs(
+        income_czk=income_czk,
+        child_months_by_order=child_months_by_order_tuple,
+        min_wage_czk=year_cfg["min_wage_czk"],
+        expense_rate=USER_DEFAULTS["expense_rate"],
+        section_15_allowances_czk=section_15_allowances_czk,
+        tax_rate=USER_DEFAULTS["tax_rate"],
+        taxpayer_credit_czk=year_cfg["taxpayer_credit"],
+        spouse_allowance_czk=year_cfg["spouse_allowance"] if spouse_allowance else 0,
+        child_bonus_annual_tiers_czk=year_cfg["child_bonus_annual_tiers"],
+        avg_wage_czk=year_cfg["avg_wage_czk"],
+        zp_min_base_share=D("0.50"),
+        sp_min_base_share=year_cfg["sp_min_base_share"],
+        sp_vym_base_share=year_cfg["sp_vym_base_share"],
+    )
+
+
 def load_year_defaults(path: str | None, user_dir: str) -> dict[int, dict[str, object]]:
     """
     Načte roční tabulky z TOML. Priorita:
@@ -202,7 +279,7 @@ def _parse_child_months(raw: str) -> tuple[int, ...]:
 
 
 def _json_dump(payload: object) -> None:
-    click.echo(json.dumps(payload, ensure_ascii=True, separators=(",", ":"), default=str))
+    click.echo(json.dumps(payload, ensure_ascii=True, indent=2, default=str))
 
 
 def _results_as_dict(inp: Inputs, res) -> dict[str, object]:
@@ -257,147 +334,7 @@ def _results_as_dict(inp: Inputs, res) -> dict[str, object]:
     }
 
 
-class DefaultGroup(click.Group):
-    def __init__(self, *args: object, default_command: str | None = None, **kwargs: object) -> None:
-        super().__init__(*args, **kwargs)
-        self.default_command = default_command
-
-    def parse_args(self, ctx: click.Context, args: list[str]) -> list[str]:
-        if self.default_command and (
-            not args
-            or (
-                args[0].startswith("-")
-                and args[0] not in {"-h", "--help", "--version"}
-            )
-            or (not args[0].startswith("-") and args[0] not in self.commands)
-        ):
-            args.insert(0, self.default_command)
-        return super().parse_args(ctx, args)
-
-
-@click.group(cls=DefaultGroup, default_command="calc")
-@click.version_option(package_name="osvc-kalkulacka")
-def cli() -> None:
-    """OSVČ kalkulačka (DPFO + ZP/SP), zjednodušený výpočet."""
-
-
-@cli.command()
-@click.option("--year", type=int, required=True, help="Rok, pro který se používají minima záloh.")
-@click.option("--income", type=int, default=None, help="Příjmy (§7) v Kč za rok.")
-@click.option(
-    "--presets",
-    type=str,
-    default=None,
-    help="Cesta k TOML s ročními presety. Alternativně lze použít OSVC_PRESETS_PATH.",
-)
-@click.option(
-    "--defaults",
-    type=str,
-    default=None,
-    help="Cesta k TOML s ročními tabulkami. Alternativně lze použít OSVC_DEFAULTS_PATH.",
-)
-@click.option(
-    "--section-15-allowances",
-    type=int,
-    default=None,
-    help="Nezdanitelné části základu daně (§15) v Kč za rok.",
-)
-@click.option(
-    "--child-months-by-order",
-    type=str,
-    default=None,
-    help="Měsíce nároku podle pořadí dětí (např. 6,6,12 pro 1., 2., 3. dítě).",
-)
-@click.option(
-    "--spouse-allowance/--no-spouse-allowance",
-    default=None,
-    help="Uplatnit/neuplnit slevu na manžela/ku (přepíše preset).",
-)
-@click.option(
-    "--format",
-    "output_format",
-    type=click.Choice(["text", "json"], case_sensitive=False),
-    default="text",
-    show_default=True,
-    help="Výstupní formát.",
-)
-def calc(
-    year: int,
-    income: int | None,
-    presets: str | None,
-    defaults: str | None,
-    section_15_allowances: int | None,
-    child_months_by_order: str | None,
-    spouse_allowance: bool | None,
-    output_format: str,
-) -> None:
-    user_dir = get_user_dir()
-
-    year_defaults = load_year_defaults(defaults, user_dir)
-    year_cfg = year_defaults.get(year)
-    if year_cfg is None:
-        known_years = ", ".join(str(y) for y in sorted(year_defaults))
-        raise SystemExit(f"Neznám daňové parametry pro rok {year}. Známé roky: {known_years}")
-    if year_cfg["min_wage_czk"] <= 0:
-        raise SystemExit(f"Chybí min_wage_czk pro rok {year}. Doplň year_defaults.toml.")
-
-    year_presets = load_year_presets(presets, user_dir)
-    preset = year_presets.get(year, {})
-    if income is not None:
-        income_czk = income
-    else:
-        preset_income = preset.get("income_czk")
-        if preset_income is None:
-            raise SystemExit("Chybí příjmy. Zadej --income nebo doplň preset pro daný rok.")
-        income_czk = _ensure_int(preset_income, name="income_czk", year=year)
-
-    if section_15_allowances is not None:
-        section_15_allowances_czk = section_15_allowances
-    else:
-        section_15_allowances_czk = _ensure_int(
-            preset.get("section_15_allowances_czk", 0),
-            name="section_15_allowances_czk",
-            year=year,
-        )
-    child_months_by_order_tuple = None
-    if child_months_by_order:
-        child_months_by_order_tuple = _parse_child_months(child_months_by_order)
-    elif "child_months_by_order" in preset:
-        child_months_by_order_tuple = _ensure_child_months(
-            preset.get("child_months_by_order"),
-            year=year,
-        )
-
-    if child_months_by_order_tuple is None:
-        raise SystemExit("Chybí child_months_by_order. Zadej --child-months-by-order nebo nastav preset.")
-    if spouse_allowance is True:
-        spouse_allowance = True
-    elif spouse_allowance is False:
-        spouse_allowance = False
-    else:
-        if "spouse_allowance" in preset:
-            spouse_allowance = _ensure_bool(preset.get("spouse_allowance"), name="spouse_allowance", year=year)
-        else:
-            spouse_allowance = False
-
-    inp = Inputs(
-        income_czk=income_czk,
-        child_months_by_order=child_months_by_order_tuple,
-        min_wage_czk=year_cfg["min_wage_czk"],
-        expense_rate=USER_DEFAULTS["expense_rate"],
-        section_15_allowances_czk=section_15_allowances_czk,
-        tax_rate=USER_DEFAULTS["tax_rate"],
-        taxpayer_credit_czk=year_cfg["taxpayer_credit"],
-        spouse_allowance_czk=year_cfg["spouse_allowance"] if spouse_allowance else 0,
-        child_bonus_annual_tiers_czk=year_cfg["child_bonus_annual_tiers"],
-        avg_wage_czk=year_cfg["avg_wage_czk"],
-        zp_min_base_share=D("0.50"),
-        sp_min_base_share=year_cfg["sp_min_base_share"],
-        sp_vym_base_share=year_cfg["sp_vym_base_share"],
-    )
-
-    res = compute(inp)
-
+def _render_calc_output(inp: Inputs, res, year: int, output_format: str) -> None:
     if output_format == "json":
         _json_dump(_results_as_dict(inp, res))
         return
@@ -467,6 +404,153 @@ def calc(
     print_row("Celkem k platbě:", total_out)
     print_row("Bonus k výplatě (odečteno):", res.tax.bonus_to_pay_czk)
     print_row("Čisté zatížení (odvody - bonus):", total_net)
+
+
+@click.group(invoke_without_command=True)
+@click.version_option(package_name="osvc-kalkulacka")
+@click.option("--year", type=int, required=False, help="Rok daňového přiznání (zdaňovací období).")
+@click.option("--income", type=int, default=None, help="Příjmy (§7) v Kč za rok.")
+@click.option(
+    "--presets",
+    type=str,
+    default=None,
+    help="Cesta k TOML s ročními presety. Alternativně lze použít OSVC_PRESETS_PATH.",
+)
+@click.option(
+    "--defaults",
+    type=str,
+    default=None,
+    help="Cesta k TOML s ročními tabulkami. Alternativně lze použít OSVC_DEFAULTS_PATH.",
+)
+@click.option(
+    "--section-15-allowances",
+    type=int,
+    default=None,
+    help="Nezdanitelné části základu daně (§15) v Kč za rok.",
+)
+@click.option(
+    "--child-months-by-order",
+    type=str,
+    default=None,
+    help="Měsíce nároku podle pořadí dětí (např. 6,6,12 pro 1., 2., 3. dítě).",
+)
+@click.option(
+    "--spouse-allowance/--no-spouse-allowance",
+    default=None,
+    help="Uplatnit/neuplnit slevu na manžela/ku (přepíše preset).",
+)
+@click.option(
+    "--format",
+    "output_format",
+    type=click.Choice(["text", "json"], case_sensitive=False),
+    default="text",
+    show_default=True,
+    help="Výstupní formát.",
+)
+@click.pass_context
+def cli(
+    ctx: click.Context,
+    year: int | None,
+    income: int | None,
+    presets: str | None,
+    defaults: str | None,
+    section_15_allowances: int | None,
+    child_months_by_order: str | None,
+    spouse_allowance: bool | None,
+    output_format: str,
+) -> None:
+    """OSVČ kalkulačka (DPFO + ZP/SP), zjednodušený výpočet."""
+    if ctx.invoked_subcommand:
+        return
+    if year is None:
+        raise click.UsageError("Chybí --year. Zadej rok výpočtu.")
+
+    inp = _build_inputs(
+        year=year,
+        income=income,
+        presets=presets,
+        defaults=defaults,
+        section_15_allowances=section_15_allowances,
+        child_months_by_order=child_months_by_order,
+        spouse_allowance=spouse_allowance,
+    )
+    res = compute(inp)
+    _render_calc_output(inp, res, year, output_format)
+
+
+@cli.command()
+@click.option("--year", type=int, required=True, help="Rok daňového přiznání (zdaňovací období).")
+@click.option("--epo", "epo_path", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--income", type=int, default=None, help="Příjmy (§7) v Kč za rok.")
+@click.option(
+    "--presets",
+    type=str,
+    default=None,
+    help="Cesta k TOML s ročními presety. Alternativně lze použít OSVC_PRESETS_PATH.",
+)
+@click.option(
+    "--defaults",
+    type=str,
+    default=None,
+    help="Cesta k TOML s ročními tabulkami. Alternativně lze použít OSVC_DEFAULTS_PATH.",
+)
+@click.option(
+    "--section-15-allowances",
+    type=int,
+    default=None,
+    help="Nezdanitelné části základu daně (§15) v Kč za rok.",
+)
+@click.option(
+    "--child-months-by-order",
+    type=str,
+    default=None,
+    help="Měsíce nároku podle pořadí dětí (např. 6,6,12 pro 1., 2., 3. dítě).",
+)
+@click.option(
+    "--spouse-allowance/--no-spouse-allowance",
+    default=None,
+    help="Uplatnit/neuplnit slevu na manžela/ku (přepíše preset).",
+)
+def verify(
+    year: int,
+    epo_path: str,
+    income: int | None,
+    presets: str | None,
+    defaults: str | None,
+    section_15_allowances: int | None,
+    child_months_by_order: str | None,
+    spouse_allowance: bool | None,
+) -> None:
+    inp = _build_inputs(
+        year=year,
+        income=income,
+        presets=presets,
+        defaults=defaults,
+        section_15_allowances=section_15_allowances,
+        child_months_by_order=child_months_by_order,
+        spouse_allowance=spouse_allowance,
+    )
+    res = compute(inp)
+    epo = parse_epo_xml(epo_path)
+    diffs = compare_epo_to_calc(epo, inp, res, expected_year=year)
+
+    def fmt_value(value: object) -> str:
+        if isinstance(value, int):
+            return fmt(value)
+        return str(value)
+
+    print(f"EPO formulář: {epo.form}")
+    if epo.year is not None:
+        print(f"Rok v EPO: {epo.year}")
+    if not diffs:
+        print("OK: Výpočty odpovídají EPO.")
+        return
+
+    print("NESHODA: nalezeny rozdíly:")
+    for diff in diffs:
+        epo_value = fmt_value(diff.epo) if diff.epo is not None else "-"
+        calc_value = fmt_value(diff.calc) if diff.calc is not None else "-"
+        print(f"- {diff.field}: EPO={epo_value} vs kalkulačka={calc_value}")
 
 @cli.command()
 @click.option("--force", is_flag=True, help="Přepsat existující preset soubor.")

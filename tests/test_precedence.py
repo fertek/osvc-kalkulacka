@@ -143,7 +143,7 @@ def test_preset_invalid_spouse_allowance_raises(tmp_path, monkeypatch):
     runner = CliRunner()
     result = runner.invoke(
         cli.cli,
-        ["calc", "--year", str(year), "--defaults", str(defaults_path), "--format", "json"],
+        ["--year", str(year), "--defaults", str(defaults_path), "--format", "json"],
     )
     assert result.exit_code != 0
     assert "spouse_allowance" in result.output
