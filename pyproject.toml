@@ -22,6 +22,7 @@ classifiers = [
 [project.urls]
 Homepage = "https://github.com/fertek/osvc-kalkulacka"
 Issues = "https://github.com/fertek/osvc-kalkulacka/issues"
+Changelog = "https://github.com/fertek/osvc-kalkulacka/blob/main/CHANGELOG.md"
 
 [project.scripts]
 osvc = "osvc_kalkulacka.cli:cli"
