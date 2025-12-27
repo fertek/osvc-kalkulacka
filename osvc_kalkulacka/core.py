@@ -202,13 +202,13 @@ def compute_insurance(inp: Inputs, base_profit_czk: int) -> InsuranceResults:
     zp_annual_payable = max(zp_annual_min, zp_annual)
     sp_annual_payable = max(sp_annual_min, sp_annual)
 
-    zp_monthly_payable = round_czk_half_up(D(zp_annual_payable) / D(12))
-    sp_monthly_payable = round_czk_half_up(D(sp_annual_payable) / D(12))
+    zp_monthly_payable = ceil_czk(D(zp_annual_payable) / D(12))
+    sp_monthly_payable = ceil_czk(D(sp_annual_payable) / D(12))
 
     return InsuranceResults(
         vym_base_czk=zp_vym_base,  # pro ZP/SP máme rozdílný VZ; reportujeme ZP VZ pro přehled
-        min_zp_monthly_czk=round_czk_half_up(D(zp_annual_min) / D("12")),
-        min_sp_monthly_czk=round_czk_half_up(D(sp_annual_min) / D("12")),
+        min_zp_monthly_czk=ceil_czk(D(zp_annual_min) / D("12")),
+        min_sp_monthly_czk=ceil_czk(D(sp_annual_min) / D("12")),
         zp_annual_czk=zp_annual,
         zp_monthly_calc_czk=zp_monthly_calc,
         zp_monthly_payable_czk=zp_monthly_payable,
