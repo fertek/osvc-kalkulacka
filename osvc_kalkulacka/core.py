@@ -77,6 +77,9 @@ class Inputs:
     sp_vym_base_share: Decimal = D("0.55")  # 55 % zisku (hlavní činnost 2024+)
     zp_min_base_share: Decimal = D("0.50")
     sp_min_base_share: Decimal = D("0.35")
+    sp_min_base_share_secondary: Decimal = D("0.11")
+    sp_threshold_secondary_czk: int = 0
+    activity_type: str = "primary"
 
 
 @dataclass(frozen=True)
@@ -184,8 +187,10 @@ def compute_insurance(inp: Inputs, base_profit_czk: int) -> InsuranceResults:
     validate_rate_0_1("sp_vym_base_share", inp.sp_vym_base_share)
     validate_rate_0_1("zp_min_base_share", inp.zp_min_base_share)
     validate_rate_0_1("sp_min_base_share", inp.sp_min_base_share)
+    validate_rate_0_1("sp_min_base_share_secondary", inp.sp_min_base_share_secondary)
     validate_rate_0_1("zp_rate", inp.zp_rate)
     validate_rate_0_1("sp_rate", inp.sp_rate)
+    nonneg_int("sp_threshold_secondary_czk", inp.sp_threshold_secondary_czk)
 
     zp_vym_base = round_czk_half_up(D(base_profit_czk) * inp.zp_vym_base_share)
     sp_vym_base = round_czk_half_up(D(base_profit_czk) * inp.sp_vym_base_share)
@@ -196,19 +201,38 @@ def compute_insurance(inp: Inputs, base_profit_czk: int) -> InsuranceResults:
     zp_monthly_calc = round_czk_half_up(D(zp_annual) / D(12))
     sp_monthly_calc = round_czk_half_up(D(sp_annual) / D(12))
 
-    zp_annual_min = ceil_czk(D(inp.avg_wage_czk) * inp.zp_min_base_share * inp.zp_rate * D("12"))
-    sp_annual_min = ceil_czk(D(inp.avg_wage_czk) * inp.sp_min_base_share * inp.sp_rate * D("12"))
+    if inp.activity_type not in ("primary", "secondary"):
+        raise ValueError("activity_type musí být primary nebo secondary.")
+
+    if inp.activity_type == "secondary":
+        zp_annual_min = 0
+        sp_annual_min = ceil_czk(
+            D(inp.avg_wage_czk) * inp.sp_min_base_share_secondary * inp.sp_rate * D("12")
+        )
+        sp_due = base_profit_czk > inp.sp_threshold_secondary_czk
+        if not sp_due:
+            sp_annual = 0
+            sp_monthly_calc = 0
+    else:
+        zp_annual_min = ceil_czk(D(inp.avg_wage_czk) * inp.zp_min_base_share * inp.zp_rate * D("12"))
+        sp_annual_min = ceil_czk(D(inp.avg_wage_czk) * inp.sp_min_base_share * inp.sp_rate * D("12"))
 
     zp_annual_payable = max(zp_annual_min, zp_annual)
-    sp_annual_payable = max(sp_annual_min, sp_annual)
+    if inp.activity_type == "secondary" and base_profit_czk <= inp.sp_threshold_secondary_czk:
+        sp_annual_payable = 0
+        min_sp_monthly = 0
+    else:
+        sp_annual_payable = max(sp_annual_min, sp_annual)
+        min_sp_monthly = ceil_czk(D(sp_annual_min) / D("12"))
 
-    zp_monthly_payable = ceil_czk(D(zp_annual_payable) / D(12))
-    sp_monthly_payable = ceil_czk(D(sp_annual_payable) / D(12))
+    min_zp_monthly = ceil_czk(D(zp_annual_min) / D("12")) if zp_annual_min else 0
+    zp_monthly_payable = ceil_czk(D(zp_annual_payable) / D(12)) if zp_annual_payable else 0
+    sp_monthly_payable = ceil_czk(D(sp_annual_payable) / D(12)) if sp_annual_payable else 0
 
     return InsuranceResults(
         vym_base_czk=zp_vym_base,  # pro ZP/SP máme rozdílný VZ; reportujeme ZP VZ pro přehled
-        min_zp_monthly_czk=ceil_czk(D(zp_annual_min) / D("12")),
-        min_sp_monthly_czk=ceil_czk(D(sp_annual_min) / D("12")),
+        min_zp_monthly_czk=min_zp_monthly,
+        min_sp_monthly_czk=min_sp_monthly,
         zp_annual_czk=zp_annual,
         zp_monthly_calc_czk=zp_monthly_calc,
         zp_monthly_payable_czk=zp_monthly_payable,

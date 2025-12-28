@@ -112,6 +112,15 @@ def _ensure_bool(value: object, *, name: str, year: int) -> bool:
     return value
 
 
+def _ensure_activity(value: object, *, year: int) -> str:
+    if not isinstance(value, str):
+        raise SystemExit(f"Rok {year}: activity musí být 'primary' nebo 'secondary'.")
+    activity = value.strip().lower()
+    if activity not in ("primary", "secondary"):
+        raise SystemExit(f"Rok {year}: activity musí být 'primary' nebo 'secondary'.")
+    return activity
+
+
 def _ensure_child_months(value: object, *, year: int) -> tuple[int, ...]:
     if not isinstance(value, list):
         raise SystemExit(f"Rok {year}: child_months_by_order musí být seznam čísel.")
@@ -133,6 +142,7 @@ def _build_inputs(
     section_15_allowances: int | None,
     child_months_by_order: str | None,
     spouse_allowance: bool | None,
+    activity: str | None,
 ) -> Inputs:
     user_dir = get_user_dir()
 
@@ -183,6 +193,15 @@ def _build_inputs(
         else:
             spouse_allowance = False
 
+    if activity is None:
+        if "activity" in preset:
+            activity = _ensure_activity(preset.get("activity"), year=year)
+        else:
+            activity = "primary"
+    activity = activity.lower()
+    if activity not in ("primary", "secondary"):
+        raise SystemExit("activity musí být primary nebo secondary.")
+
     return Inputs(
         income_czk=income_czk,
         child_months_by_order=child_months_by_order_tuple,
@@ -197,6 +216,9 @@ def _build_inputs(
         zp_min_base_share=D("0.50"),
         sp_min_base_share=year_cfg["sp_min_base_share"],
         sp_vym_base_share=year_cfg["sp_vym_base_share"],
+        sp_min_base_share_secondary=year_cfg["sp_min_base_share_secondary"],
+        sp_threshold_secondary_czk=year_cfg["sp_threshold_secondary_czk"],
+        activity_type=activity,
     )
 
 
@@ -227,6 +249,8 @@ def load_year_defaults(path: str | None, user_dir: str) -> dict[int, dict[str, o
         "spouse_allowance",
         "sp_vym_base_share",
         "sp_min_base_share",
+        "sp_min_base_share_secondary",
+        "sp_threshold_secondary_czk",
     }
 
     out: dict[int, dict[str, object]] = {}
@@ -260,6 +284,12 @@ def load_year_defaults(path: str | None, user_dir: str) -> dict[int, dict[str, o
 
         sp_vym_base_share = _ensure_decimal_0_1(value["sp_vym_base_share"], name="sp_vym_base_share", year=year_key)
         sp_min_base_share = _ensure_decimal_0_1(value["sp_min_base_share"], name="sp_min_base_share", year=year_key)
+        sp_min_base_share_secondary = _ensure_decimal_0_1(
+            value["sp_min_base_share_secondary"], name="sp_min_base_share_secondary", year=year_key
+        )
+        sp_threshold_secondary_czk = _ensure_int(
+            value["sp_threshold_secondary_czk"], name="sp_threshold_secondary_czk", year=year_key
+        )
 
         out[year_key] = {
             "avg_wage_czk": avg_wage_czk,
@@ -269,6 +299,8 @@ def load_year_defaults(path: str | None, user_dir: str) -> dict[int, dict[str, o
             "child_bonus_annual_tiers": child_tiers,
             "sp_vym_base_share": sp_vym_base_share,
             "sp_min_base_share": sp_min_base_share,
+            "sp_min_base_share_secondary": sp_min_base_share_secondary,
+            "sp_threshold_secondary_czk": sp_threshold_secondary_czk,
         }
 
     return out
@@ -285,6 +317,7 @@ def _json_dump(payload: object) -> None:
 def _results_as_dict(inp: Inputs, res) -> dict[str, object]:
     return {
         "inputs": {
+            "activity_type": inp.activity_type,
             "income_czk": inp.income_czk,
             "child_months_by_order": list(inp.child_months_by_order),
             "min_wage_czk": inp.min_wage_czk,
@@ -301,6 +334,8 @@ def _results_as_dict(inp: Inputs, res) -> dict[str, object]:
             "sp_vym_base_share": str(inp.sp_vym_base_share),
             "zp_min_base_share": str(inp.zp_min_base_share),
             "sp_min_base_share": str(inp.sp_min_base_share),
+            "sp_min_base_share_secondary": str(inp.sp_min_base_share_secondary),
+            "sp_threshold_secondary_czk": inp.sp_threshold_secondary_czk,
         },
         "tax": {
             "expenses_czk": res.tax.expenses_czk,
@@ -341,6 +376,9 @@ def _render_calc_output(inp: Inputs, res, year: int, output_format: str) -> None
 
     print("OSVČ kalkulačka – DPFO + pojistné (zjednodušený výpočet)")
     print("-" * 70)
+    activity_label = "primary (hlavní)" if inp.activity_type == "primary" else "secondary (vedlejší)"
+    print_row_text("Typ činnosti:", activity_label)
+    print()
 
     print("DPFO (daň z příjmů)")
     print_row("Příjmy (§7):", inp.income_czk)
@@ -373,7 +411,10 @@ def _render_calc_output(inp: Inputs, res, year: int, output_format: str) -> None
     print("-" * 70)
 
     print("Pojistné (ZP/SP) – odhad z ročního zisku")
-    print("(Pozn.: pokud výpočet vychází pod minimem, platí se minimální zálohy.)")
+    if inp.activity_type == "primary":
+        print("(Pozn.: pokud výpočet vychází pod minimem, platí se minimální zálohy.)")
+    else:
+        print("(Pozn.: vedlejší činnost – ZP bez minima, SP jen nad rozhodnou částku.)")
     print_row("Vyměřovací základ (50 % zisku):", res.ins.vym_base_czk)
     print()
 
@@ -386,6 +427,8 @@ def _render_calc_output(inp: Inputs, res, year: int, output_format: str) -> None
     print()
 
     print("Sociální pojištění (SP)")
+    if inp.activity_type == "secondary":
+        print_row("  Rozhodná částka (limit):", inp.sp_threshold_secondary_czk)
     print_row("  Ročně (29,2 % z VZ):", res.ins.sp_annual_czk)
     print_row("  Měsíčně vypočteno (roční/12):", res.ins.sp_monthly_calc_czk)
     print_row(f"  Minimální záloha ({year}):", res.ins.min_sp_monthly_czk)
@@ -440,6 +483,12 @@ def _render_calc_output(inp: Inputs, res, year: int, output_format: str) -> None
     help="Uplatnit/neuplnit slevu na manžela/ku (přepíše preset).",
 )
 @click.option(
+    "--activity",
+    type=click.Choice(["primary", "secondary"], case_sensitive=False),
+    default=None,
+    help="Typ samostatné výdělečné činnosti (primary/secondary).",
+)
+@click.option(
     "--format",
     "output_format",
     type=click.Choice(["text", "json"], case_sensitive=False),
@@ -457,6 +506,7 @@ def cli(
     section_15_allowances: int | None,
     child_months_by_order: str | None,
     spouse_allowance: bool | None,
+    activity: str | None,
     output_format: str,
 ) -> None:
     """OSVČ kalkulačka (DPFO + ZP/SP), zjednodušený výpočet."""
@@ -473,6 +523,7 @@ def cli(
         section_15_allowances=section_15_allowances,
         child_months_by_order=child_months_by_order,
         spouse_allowance=spouse_allowance,
+        activity=activity,
     )
     res = compute(inp)
     _render_calc_output(inp, res, year, output_format)
@@ -511,6 +562,12 @@ def cli(
     default=None,
     help="Uplatnit/neuplnit slevu na manžela/ku (přepíše preset).",
 )
+@click.option(
+    "--activity",
+    type=click.Choice(["primary", "secondary"], case_sensitive=False),
+    default=None,
+    help="Typ samostatné výdělečné činnosti (primary/secondary).",
+)
 def verify(
     year: int,
     epo_path: str,
@@ -520,6 +577,7 @@ def verify(
     section_15_allowances: int | None,
     child_months_by_order: str | None,
     spouse_allowance: bool | None,
+    activity: str | None,
 ) -> None:
     inp = _build_inputs(
         year=year,
@@ -529,6 +587,7 @@ def verify(
         section_15_allowances=section_15_allowances,
         child_months_by_order=child_months_by_order,
         spouse_allowance=spouse_allowance,
+        activity=activity,
     )
     res = compute(inp)
     epo = parse_epo_xml(epo_path)

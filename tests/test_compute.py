@@ -133,3 +133,43 @@ def test_minimums_match_official_values_2022_2026():
 
         assert ins.min_zp_monthly_czk == expected_zp
         assert ins.min_sp_monthly_czk == expected_sp
+
+
+def test_secondary_activity_below_threshold_pays_no_sp_and_no_zp_minimum():
+    year_defaults = load_year_defaults("osvc_kalkulacka/data/year_defaults.toml", user_dir=".")
+    sp_threshold = year_defaults[2025]["sp_threshold_secondary_czk"]
+    inp = Inputs(
+        income_czk=200_000,
+        child_months_by_order=(),
+        min_wage_czk=0,
+        avg_wage_czk=40_000,
+        activity_type="secondary",
+        sp_threshold_secondary_czk=sp_threshold,
+        sp_min_base_share_secondary=Decimal("0.11"),
+    )
+
+    res = compute(inp)
+
+    assert res.ins.zp_annual_payable_czk == res.ins.zp_annual_czk
+    assert res.ins.min_zp_monthly_czk == 0
+    assert res.ins.sp_annual_payable_czk == 0
+    assert res.ins.min_sp_monthly_czk == 0
+
+
+def test_secondary_activity_above_threshold_uses_secondary_minimum():
+    year_defaults = load_year_defaults("osvc_kalkulacka/data/year_defaults.toml", user_dir=".")
+    sp_threshold = year_defaults[2025]["sp_threshold_secondary_czk"]
+    inp = Inputs(
+        income_czk=500_000,
+        child_months_by_order=(),
+        min_wage_czk=0,
+        avg_wage_czk=40_000,
+        activity_type="secondary",
+        sp_threshold_secondary_czk=sp_threshold,
+        sp_min_base_share_secondary=Decimal("0.11"),
+    )
+
+    res = compute(inp)
+
+    assert res.ins.sp_annual_payable_czk > 0
+    assert res.ins.min_sp_monthly_czk > 0

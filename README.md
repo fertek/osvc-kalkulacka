@@ -69,6 +69,7 @@ income_czk = 650000
 section_15_allowances_czk = 150000
 child_months_by_order = [6, 12]
 spouse_allowance = true
+activity = "primary"
 ```
 
 Hodnota `child_months_by_order` je seznam měsíců nároku podle pořadí dítěte (1., 2., 3+). Zápis `child_months_by_order = [6, 12]` znamená 1. dítě 6 měsíců, 2. dítě 12 měsíců.
@@ -88,7 +89,7 @@ osvc --year 2025
 5) Když chceš přepsat hodnoty z předvoleb, zadej je přímo:
 
 ```bash
-osvc --year 2025 --income 800000 --child-months-by-order 12
+osvc --year 2025 --income 800000 --child-months-by-order 12 --activity primary
 ```
 
 ## Ověření s EPO XML
@@ -150,3 +151,10 @@ Export vestavěných tabulek do souboru:
 ```bash
 osvc defaults dump --output year_defaults.toml
 ```
+
+## Omezení kalkulačky (zatím neřešíme)
+
+- Krácení rozhodné částky pro vedlejší činnost podle počtu měsíců výkonu.
+- Krácení rozhodné částky při nároku na nemocenské/peněžitou pomoc v mateřství/dlouhodobé ošetřovné u OSVČ.
+- Dobrovolná účast na důchodovém pojištění u vedlejší činnosti.
+- Paušální režim (paušální daň a související pravidla).

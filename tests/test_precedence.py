@@ -5,6 +5,9 @@ from click.testing import CliRunner
 
 from osvc_kalkulacka import cli
 
+YEAR_DEFAULTS = cli.load_year_defaults("osvc_kalkulacka/data/year_defaults.toml", user_dir=".")
+SECONDARY_THRESHOLD = YEAR_DEFAULTS[2025]["sp_threshold_secondary_czk"]
+
 
 def _write_toml(path, content: str) -> None:
     path.write_text(content, encoding="utf-8")
@@ -20,6 +23,8 @@ def _defaults_toml(year: int, avg_wage: int) -> str:
             "spouse_allowance = 0",
             "sp_vym_base_share = 0.55",
             "sp_min_base_share = 0.35",
+            "sp_min_base_share_secondary = 0.11",
+            f"sp_threshold_secondary_czk = {SECONDARY_THRESHOLD}",
             "child_bonus_annual_tiers = [1, 2, 3]",
             "",
         ]
