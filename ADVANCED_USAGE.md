@@ -1,8 +1,8 @@
 # Pokročilé použití
 
-## Výchozí tabulky (year_defaults)
+## Výchozí parametry výpočtu (year_defaults)
 
-Výchozí tabulky obsahují roční parametry pro výpočet (průměrná/minimální mzda, slevy, sazby). Bez nich výpočet neběží.
+Výchozí parametry výpočtu obsahují roční hodnoty pro výpočet (průměrná/minimální mzda, slevy, sazby). Bez nich výpočet neběží.
 
 ### Pořadí zdrojů (priorita)
 
@@ -15,7 +15,9 @@ OSVC_DEFAULTS_PATH=./my_year_defaults.toml osvc --year 2025
 vestavěné year_defaults.toml
 ```
 
-### Export vestavěných tabulek
+### Výpis výchozích parametrů výpočtu (year_defaults.toml)
+
+Vypíše výchozí parametry výpočtu pro jednotlivá zdaňovací období z balíčku; s `--output` je uloží do souboru.
 
 ```bash
 osvc defaults --output year_defaults.toml

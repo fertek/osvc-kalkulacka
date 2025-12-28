@@ -85,7 +85,7 @@ activity = "primary"
 
 Hodnota `child_months_by_order` je seznam měsíců nároku podle pořadí dítěte (1., 2., 3+). Zápis `child_months_by_order = [6, 12]` znamená 1. dítě 6 měsíců, 2. dítě 12 měsíců.
 
-3) Volitelně pracuj s výchozími tabulkami přes `osvc defaults`, detaily v [ADVANCED_USAGE.md](https://github.com/fertek/osvc-kalkulacka/blob/main/ADVANCED_USAGE.md).
+3) Volitelně pracuj s výchozími parametry výpočtu přes `osvc defaults`, detaily v [ADVANCED_USAGE.md](https://github.com/fertek/osvc-kalkulacka/blob/main/ADVANCED_USAGE.md).
 
 4) Spusť výpočet jen s `--year`, pokud máš v předvolbách vše potřebné:
 

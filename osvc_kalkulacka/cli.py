@@ -46,8 +46,11 @@ def get_user_dir() -> str:
 
 
 def _load_toml(path: str) -> dict[str, object]:
-    with open(path, "rb") as f:
-        return tomllib.load(f)
+    try:
+        with open(path, "rb") as f:
+            return tomllib.load(f)
+    except FileNotFoundError as exc:
+        raise SystemExit(f"Soubor nenalezen: {path}") from exc
 
 
 def _load_package_toml(filename: str) -> dict[str, object]:
@@ -836,7 +839,7 @@ def presets_import_epo(
 @cli.command("defaults")
 @click.option("--output", type=click.Path(dir_okay=False, writable=True), default=None)
 def defaults_dump(output: str | None) -> None:
-    """Vyexportuje vestavěné year_defaults.toml."""
+    """Vypíše výchozí parametry výpočtu (year_defaults.toml); s --output je uloží do souboru."""
     data = resources.files("osvc_kalkulacka.data").joinpath("year_defaults.toml").read_bytes()
     if output:
         with open(output, "wb") as f:
