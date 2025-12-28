@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+from decimal import Decimal
 from importlib import resources
 import tomllib
 
@@ -74,7 +75,8 @@ def load_year_presets(path: str | None, user_dir: str) -> dict[int, dict[str, ob
             preset_path = os.path.join(user_dir, "year_presets.toml")
             if not os.path.exists(preset_path):
                 raise SystemExit(
-                    f"Chybí preset soubor: {preset_path}. Spusť `osvc init` nebo zadej --presets."
+                    f"Chybí preset soubor: {preset_path}. Spusť "
+                    "`osvc presets template --output-default` nebo zadej --presets."
                 )
             data = _load_toml(preset_path)
 
@@ -133,6 +135,72 @@ def _ensure_child_months(value: object, *, year: int) -> tuple[int, ...]:
     return tuple(months)
 
 
+def _ensure_int_from_epo(value: object, *, name: str, year: int) -> int:
+    if isinstance(value, Decimal):
+        if value != value.to_integral_value():
+            raise SystemExit(f"Rok {year}: {name} musí být celé číslo.")
+        value = int(value)
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise SystemExit(f"Rok {year}: {name} musí být celé číslo.")
+    if value < 0:
+        raise SystemExit(f"Rok {year}: {name} nesmí být záporné.")
+    return value
+
+
+def _toml_value(value: object) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, Decimal):
+        if value == value.to_integral_value():
+            return str(int(value))
+        return str(value)
+    if isinstance(value, list):
+        return "[" + ", ".join(_toml_value(item) for item in value) + "]"
+    if isinstance(value, tuple):
+        return "[" + ", ".join(_toml_value(item) for item in value) + "]"
+    if isinstance(value, str):
+        return json.dumps(value, ensure_ascii=True)
+    raise SystemExit(f"Neznámý typ hodnoty pro TOML: {type(value).__name__}")
+
+
+def _render_presets_toml(presets: dict[int, dict[str, object]]) -> str:
+    lines: list[str] = []
+    order = [
+        "income_czk",
+        "section_15_allowances_czk",
+        "child_months_by_order",
+        "spouse_allowance",
+        "activity",
+    ]
+    for idx, year in enumerate(sorted(presets)):
+        if idx:
+            lines.append("")
+        lines.append(f"[\"{year}\"]")
+        preset = presets[year]
+        for key in order:
+            if key in preset:
+                lines.append(f"{key} = {_toml_value(preset[key])}")
+        extra_keys = sorted(k for k in preset.keys() if k not in order)
+        for key in extra_keys:
+            lines.append(f"{key} = {_toml_value(preset[key])}")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _normalize_year_presets(data: dict[str, object]) -> dict[int, dict[str, object]]:
+    out: dict[int, dict[str, object]] = {}
+    for key, value in data.items():
+        try:
+            year_key = int(key)
+        except (TypeError, ValueError):
+            continue
+        if isinstance(value, dict):
+            out[year_key] = value
+    return out
+
+
 def _build_inputs(
     *,
     year: int,
@@ -150,7 +218,10 @@ def _build_inputs(
     year_cfg = year_defaults.get(year)
     if year_cfg is None:
         known_years = ", ".join(str(y) for y in sorted(year_defaults))
-        raise SystemExit(f"Neznám daňové parametry pro rok {year}. Známé roky: {known_years}")
+        raise SystemExit(
+            f"Neznám daňové parametry pro rok {year}. Známé roky: {known_years}. "
+            "Doplň year_defaults.toml."
+        )
     if year_cfg["min_wage_czk"] <= 0:
         raise SystemExit(f"Chybí min_wage_czk pro rok {year}. Doplň year_defaults.toml.")
 
@@ -451,7 +522,12 @@ def _render_calc_output(inp: Inputs, res, year: int, output_format: str) -> None
 
 @click.group(invoke_without_command=True)
 @click.version_option(package_name="osvc-kalkulacka")
-@click.option("--year", type=int, required=False, help="Rok daňového přiznání (zdaňovací období).")
+@click.option(
+    "--year",
+    type=int,
+    required=False,
+    help="Rok daňového přiznání (zdaňovací období). Když není zadán, vezme se z EPO XML.",
+)
 @click.option("--income", type=int, default=None, help="Příjmy (§7) v Kč za rok.")
 @click.option(
     "--presets",
@@ -530,7 +606,7 @@ def cli(
 
 
 @cli.command()
-@click.option("--year", type=int, required=True, help="Rok daňového přiznání (zdaňovací období).")
+@click.option("--year", type=int, required=False, help="Rok daňového přiznání (zdaňovací období).")
 @click.option("--epo", "epo_path", type=click.Path(exists=True, dir_okay=False), required=True)
 @click.option("--income", type=int, default=None, help="Příjmy (§7) v Kč za rok.")
 @click.option(
@@ -569,7 +645,7 @@ def cli(
     help="Typ samostatné výdělečné činnosti (primary/secondary).",
 )
 def verify(
-    year: int,
+    year: int | None,
     epo_path: str,
     income: int | None,
     presets: str | None,
@@ -579,6 +655,11 @@ def verify(
     spouse_allowance: bool | None,
     activity: str | None,
 ) -> None:
+    epo = parse_epo_xml(epo_path)
+    if year is None:
+        if epo.year is None:
+            raise SystemExit("Chybí --year a EPO XML nemá rok.")
+        year = epo.year
     inp = _build_inputs(
         year=year,
         income=income,
@@ -590,7 +671,6 @@ def verify(
         activity=activity,
     )
     res = compute(inp)
-    epo = parse_epo_xml(epo_path)
     diffs = compare_epo_to_calc(epo, inp, res, expected_year=year)
 
     def fmt_value(value: object) -> str:
@@ -610,21 +690,6 @@ def verify(
         epo_value = fmt_value(diff.epo) if diff.epo is not None else "-"
         calc_value = fmt_value(diff.calc) if diff.calc is not None else "-"
         print(f"- {diff.field}: EPO={epo_value} vs kalkulačka={calc_value}")
-
-@cli.command()
-@click.option("--force", is_flag=True, help="Přepsat existující preset soubor.")
-def init(force: bool) -> None:
-    """Vytvoří year_presets.toml v uživatelském adresáři ze šablony."""
-    user_dir = get_user_dir()
-    os.makedirs(user_dir, exist_ok=True)
-    target_path = os.path.join(user_dir, "year_presets.toml")
-    if os.path.exists(target_path) and not force:
-        raise SystemExit(f"Soubor už existuje: {target_path}. Použij --force.")
-    data = resources.files("osvc_kalkulacka.data").joinpath("year_presets.example.toml").read_bytes()
-    with open(target_path, "wb") as f:
-        f.write(data)
-    click.echo(f"Vytvořeno: {target_path}")
-
 
 @cli.group()
 def config() -> None:
@@ -649,11 +714,126 @@ def config_path() -> None:
 
 
 @cli.group()
-def defaults() -> None:
-    """Práce s vestavěnými defaults."""
+def presets() -> None:
+    """Práce s ročními presety."""
 
 
-@defaults.command("dump")
+@presets.command("template")
+@click.option("--output", type=click.Path(dir_okay=False, writable=True), default=None)
+@click.option("--output-default", is_flag=True, help="Zapsat do {user_dir}/year_presets.toml.")
+@click.option("--force", is_flag=True, help="Přepsat existující preset soubor.")
+def presets_template(output: str | None, output_default: bool, force: bool) -> None:
+    """Vypíše nebo uloží šablonu presetů."""
+    if output and output_default:
+        raise SystemExit("Nelze kombinovat --output a --output-default.")
+    data = resources.files("osvc_kalkulacka.data").joinpath("year_presets.example.toml").read_bytes()
+    if output_default:
+        user_dir = get_user_dir()
+        os.makedirs(user_dir, exist_ok=True)
+        output = os.path.join(user_dir, "year_presets.toml")
+    if output is None:
+        click.echo(data.decode("utf-8"), nl=True)
+        return
+    if os.path.exists(output) and not force:
+        raise SystemExit(f"Soubor už existuje: {output}. Použij --force.")
+    with open(output, "wb") as f:
+        f.write(data)
+    click.echo(f"Zapsáno: {output}")
+
+
+@presets.command("import-epo")
+@click.option("--epo", "epo_path", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option(
+    "--output",
+    type=click.Path(dir_okay=False, writable=True),
+    default=None,
+    help="Výstupní TOML (zapsat do zadaného souboru; bez outputu se vypisuje na stdout).",
+)
+@click.option(
+    "--output-default",
+    is_flag=True,
+    help="Zapsat do {user_dir}/year_presets.toml.",
+)
+@click.option("--force", is_flag=True, help="Přepsat existující rok v preset souboru.")
+@click.option(
+    "--activity",
+    type=click.Choice(["primary", "secondary"], case_sensitive=False),
+    default=None,
+    help="Typ samostatné výdělečné činnosti (primary/secondary).",
+)
+def presets_import_epo(
+    epo_path: str,
+    output: str | None,
+    force: bool,
+    activity: str | None,
+    output_default: bool,
+) -> None:
+    if output and output_default:
+        raise SystemExit("Nelze kombinovat --output a --output-default.")
+    epo = parse_epo_xml(epo_path)
+    if epo.year is None:
+        raise SystemExit("V EPO XML chybí rok.")
+
+    values = epo.values
+    income = values.get("income_czk")
+    if income is None:
+        raise SystemExit("V EPO XML chybí příjmy (income_czk).")
+    income_czk = _ensure_int_from_epo(income, name="income_czk", year=epo.year)
+
+    section_15_raw = values.get("section_15_allowances_czk", 0)
+    section_15_allowances_czk = _ensure_int_from_epo(
+        section_15_raw,
+        name="section_15_allowances_czk",
+        year=epo.year,
+    )
+
+    child_raw = values.get("child_months_by_order")
+    if child_raw is None:
+        child_months_by_order = []
+    elif isinstance(child_raw, tuple):
+        child_months_by_order = list(_ensure_child_months(list(child_raw), year=epo.year))
+    else:
+        raise SystemExit("V EPO XML má child_months_by_order neplatný formát.")
+
+    spouse_credit_raw = values.get("spouse_credit_applied_czk")
+    if spouse_credit_raw is None:
+        spouse_allowance = False
+    elif isinstance(spouse_credit_raw, (int, Decimal)):
+        spouse_allowance = spouse_credit_raw > 0
+    else:
+        raise SystemExit("V EPO XML má spouse_credit_applied_czk neplatný formát.")
+
+    preset: dict[str, object] = {
+        "income_czk": income_czk,
+        "section_15_allowances_czk": section_15_allowances_czk,
+        "child_months_by_order": child_months_by_order,
+        "spouse_allowance": spouse_allowance,
+    }
+    if activity is not None:
+        preset["activity"] = activity.lower()
+
+    if output_default:
+        user_dir = get_user_dir()
+        os.makedirs(user_dir, exist_ok=True)
+        output = os.path.join(user_dir, "year_presets.toml")
+    if output is None:
+        click.echo(_render_presets_toml({epo.year: preset}), nl=True)
+        return
+
+    if os.path.exists(output):
+        data = _load_toml(output)
+        presets_data = _normalize_year_presets(data)
+        if epo.year in presets_data and not force:
+            raise SystemExit(f"Rok {epo.year} už v {output} existuje. Použij --force.")
+    else:
+        presets_data = {}
+    presets_data[epo.year] = preset
+    with open(output, "w", encoding="utf-8") as f:
+        f.write(_render_presets_toml(presets_data))
+    click.echo(f"Zapsáno: {output}")
+
+
+@cli.command("defaults")
 @click.option("--output", type=click.Path(dir_okay=False, writable=True), default=None)
 def defaults_dump(output: str | None) -> None:
     """Vyexportuje vestavěné year_defaults.toml."""

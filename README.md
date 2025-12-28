@@ -22,7 +22,8 @@ Umí počítat pro různé roky a snadno porovnat výsledky mezi nimi, ne jen ak
 PyPI: https://pypi.org/project/osvc-kalkulacka/
 
 ```bash
-pip install osvc-kalkulacka
+python3 -m venv .venv
+.venv/bin/pip install osvc-kalkulacka
 ```
 
 ```bash
@@ -36,7 +37,7 @@ pipx install osvc-kalkulacka
 Aktualizace:
 
 ```bash
-pip install --upgrade osvc-kalkulacka
+.venv/bin/pip install --upgrade osvc-kalkulacka
 ```
 
 ```bash
@@ -52,7 +53,7 @@ pipx upgrade osvc-kalkulacka
 1) Vytvoř předvolby pro roky, se kterými počítáš:
 
 ```bash
-osvc init
+osvc presets template --output-default
 ```
 
 ```bash
@@ -60,6 +61,16 @@ osvc init
 ```
 
 2) Doplň `year_presets.toml` (příjmy, děti, nezdanitelné části…). Minimálně potřebuješ `income_czk` pro daný rok. Výchozí cesta je `~/.config/osvc-kalkulacka/year_presets.toml` a ověříš ji přes `osvc config path`.
+
+Pokud máš XML z EPO, můžeš si presety vygenerovat automaticky:
+
+```bash
+osvc presets import-epo ./dpfo_2022.xml --output ~/.config/osvc-kalkulacka/year_presets.jan_novak.toml
+osvc presets import-epo ./dpfo_2023.xml --output ~/.config/osvc-kalkulacka/year_presets.jan_novak.toml
+osvc presets import-epo ./dpfo_2024.xml --output ~/.config/osvc-kalkulacka/year_presets.jan_novak.toml
+```
+
+Pokud v cílovém souboru už rok existuje, použij `--force`.
 
 Příklad obsahu:
 
@@ -74,11 +85,7 @@ activity = "primary"
 
 Hodnota `child_months_by_order` je seznam měsíců nároku podle pořadí dítěte (1., 2., 3+). Zápis `child_months_by_order = [6, 12]` znamená 1. dítě 6 měsíců, 2. dítě 12 měsíců.
 
-3) Volitelně přepiš výchozí tabulky, pokud potřebuješ vlastní parametry:
-
-```text
-nano ~/.config/osvc-kalkulacka/year_defaults.override.toml
-```
+3) Volitelně pracuj s výchozími tabulkami přes `osvc defaults`, detaily v [ADVANCED_USAGE.md](https://github.com/fertek/osvc-kalkulacka/blob/main/ADVANCED_USAGE.md).
 
 4) Spusť výpočet jen s `--year`, pokud máš v předvolbách vše potřebné:
 
@@ -90,6 +97,12 @@ osvc --year 2025
 
 ```bash
 osvc --year 2025 --income 800000 --child-months-by-order 12 --activity primary
+```
+
+Pokud chceš použít jiný preset soubor, zadej ho přes `--presets`:
+
+```bash
+osvc --year 2024 --presets ~/.config/osvc-kalkulacka/year_presets.jan_novak.toml
 ```
 
 ## Ověření s EPO XML
@@ -108,49 +121,15 @@ Zobrazení cest:
 osvc config path
 ```
 
-Poznámka: výchozí adresář lze změnit přes `OSVC_USER_PATH`. Cesty k presetům/defaultům můžeš přepsat přes `OSVC_PRESETS_PATH` a `OSVC_DEFAULTS_PATH`.
-
 Očekávané soubory:
 
 ```text
 ~/.config/osvc-kalkulacka/year_presets.toml
-~/.config/osvc-kalkulacka/year_defaults.override.toml
 ```
 
-## Pořadí zdrojů
+## Pokročilé použití
 
-Předvolby (roční vstupy):
-Vlastní čísla, která zadáváš každý rok (příjmy, dary, děti). Slouží jako výchozí hodnoty pro výpočet.
-
-Priorita je shora dolů (první nalezená cesta vyhrává).
-
-Příklad: pokud nastavíš `OSVC_PRESETS_PATH`, přebije soubor v `~/.config/osvc-kalkulacka/year_presets.toml`.
-
-```text
-osvc --presets ./my_year_presets.toml --year 2025
-OSVC_PRESETS_PATH=./my_year_presets.toml osvc --year 2025
-~/.config/osvc-kalkulacka/year_presets.toml
-```
-
-Výchozí tabulky (parametry pro výpočet):
-Oficiální roční parametry (průměrná/minimální mzda, slevy, sazby). Bez nich výpočet neběží.
-
-Priorita je shora dolů (první nalezená cesta vyhrává).
-
-Příklad: pokud nastavíš `OSVC_DEFAULTS_PATH`, přebije `~/.config/osvc-kalkulacka/year_defaults.override.toml` i vestavěný soubor.
-
-```text
-osvc --defaults ./my_year_defaults.toml --year 2025
-OSVC_DEFAULTS_PATH=./my_year_defaults.toml osvc --year 2025
-~/.config/osvc-kalkulacka/year_defaults.override.toml (pokud existuje)
-vestavěné year_defaults.toml
-```
-
-Export vestavěných tabulek do souboru:
-
-```bash
-osvc defaults dump --output year_defaults.toml
-```
+Detaily k `osvc defaults` a pokročilé konfiguraci jsou v [ADVANCED_USAGE.md](https://github.com/fertek/osvc-kalkulacka/blob/main/ADVANCED_USAGE.md).
 
 ## Omezení kalkulačky (zatím neřešíme)
 

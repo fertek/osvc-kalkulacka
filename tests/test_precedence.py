@@ -121,7 +121,7 @@ def test_load_year_presets_missing(tmp_path, monkeypatch):
     monkeypatch.delenv("OSVC_PRESETS_PATH", raising=False)
     with pytest.raises(SystemExit) as excinfo:
         cli.load_year_presets(None, str(tmp_path))
-    assert "osvc init" in str(excinfo.value)
+    assert "osvc presets template --output-default" in str(excinfo.value)
 
 
 def test_preset_invalid_spouse_allowance_raises(tmp_path, monkeypatch):

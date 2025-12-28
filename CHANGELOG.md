@@ -4,7 +4,18 @@ Všechny významné změny v tomto projektu budou zaznamenány v tomto souboru.
 ## [Unreleased]
 - (zatim nic)
 
-## [0.6.0] - 2025-12-18
+## [0.7.0] - 2025-12-28
+### Přidáno
+- Příkaz `osvc presets import-epo` pro generování ročních presetů z EPO XML.
+- Příkaz `osvc presets template` pro vypsání/zápis šablony presetů (`--output`, `--output-default`, `--force`).
+- `verify` umí vzít rok automaticky z EPO XML, pokud není zadán `--year`.
+
+### Změněno
+- `osvc defaults` je nyní přímý příkaz (bez `dump`).
+- `osvc init` je nyní `osvc presets template`.
+- README zjednodušeno a přesun detailů o defaults do `ADVANCED_USAGE.md`.
+
+## [0.6.0] - 2025-12-28
 ### Přidáno
 - Volba typu činnosti `--activity primary|secondary` (včetně presetů).
 - Výpočet pojistného pro vedlejší činnost (bez minima u ZP, rozhodná částka u SP).
