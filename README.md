@@ -60,14 +60,14 @@ osvc presets template --output-default
 ~/.config/osvc-kalkulacka/year_presets.toml
 ```
 
-2) Doplň `year_presets.toml` (příjmy, děti, nezdanitelné části…). Minimálně potřebuješ `income_czk` pro daný rok. Výchozí cesta je `~/.config/osvc-kalkulacka/year_presets.toml` a ověříš ji přes `osvc config path`.
+2) Doplň `year_presets.toml` (příjmy, děti, nezdanitelné části…). Minimálně potřebuješ `section_7_items` pro daný rok. Výchozí cesta je `~/.config/osvc-kalkulacka/year_presets.toml` a ověříš ji přes `osvc config path`.
 
 Pokud máš XML z EPO, můžeš si presety vygenerovat automaticky:
 
 ```bash
-osvc presets import-epo ./dpfo_2022.xml --output ~/.config/osvc-kalkulacka/year_presets.jan_novak.toml
-osvc presets import-epo ./dpfo_2023.xml --output ~/.config/osvc-kalkulacka/year_presets.jan_novak.toml
-osvc presets import-epo ./dpfo_2024.xml --output ~/.config/osvc-kalkulacka/year_presets.jan_novak.toml
+osvc presets import-epo --epo ./dpfo_2022.xml --output ~/.config/osvc-kalkulacka/year_presets.jan_novak.toml
+osvc presets import-epo --epo ./dpfo_2023.xml --output ~/.config/osvc-kalkulacka/year_presets.jan_novak.toml
+osvc presets import-epo --epo ./dpfo_2024.xml --output ~/.config/osvc-kalkulacka/year_presets.jan_novak.toml
 ```
 
 Pokud v cílovém souboru už rok existuje, použij `--force`.
@@ -76,7 +76,14 @@ Příklad obsahu:
 
 ```toml
 ["2025"]
-income_czk = 650000
+section_7_items = [
+  { income_czk = 400000, expense_rate = 0.60 }
+  { income_czk = 50000, expense_rate = 0.40 }
+]
+par_6_base_czk = 300000
+par_8_base_czk = 15000
+par_9_base_czk = 0
+par_10_base_czk = 20000
 section_15_allowances_czk = 150000
 child_months_by_order = [6, 12]
 spouse_allowance = true
@@ -96,7 +103,7 @@ osvc --year 2025
 5) Když chceš přepsat hodnoty z předvoleb, zadej je přímo:
 
 ```bash
-osvc --year 2025 --income 800000 --child-months-by-order 12 --activity primary
+osvc --year 2025 --section7 income=800000,rate=0.60 --child-months-by-order 12 --activity primary
 ```
 
 Pokud chceš použít jiný preset soubor, zadej ho přes `--presets`:

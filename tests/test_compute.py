@@ -1,15 +1,16 @@
 from decimal import Decimal
 
+import pytest
+
 from osvc_kalkulacka.cli import load_year_defaults
-from osvc_kalkulacka.core import Inputs, compute, compute_insurance
+from osvc_kalkulacka.core import Inputs, Section7Item, compute, compute_insurance
 
 
 def test_compute_regression_2025_example():
     inp = Inputs(
-        income_czk=800_000,
+        section_7_items=(Section7Item(income_czk=800_000, expense_rate=Decimal("0.60")),),
         child_months_by_order=(12,),
         min_wage_czk=20_800,
-        expense_rate=Decimal("0.60"),
         section_15_allowances_czk=150_000,
         tax_rate=Decimal("0.15"),
         taxpayer_credit_czk=30_840,
@@ -35,10 +36,9 @@ def test_compute_regression_2025_example():
 
 def test_child_bonus_ineligible_when_income_below_minimum():
     inp = Inputs(
-        income_czk=100_000,
+        section_7_items=(Section7Item(income_czk=100_000, expense_rate=Decimal("0.60")),),
         child_months_by_order=(12,),
         min_wage_czk=20_800,
-        expense_rate=Decimal("0.60"),
         section_15_allowances_czk=0,
         tax_rate=Decimal("0.15"),
         taxpayer_credit_czk=30_840,
@@ -61,10 +61,8 @@ def test_child_bonus_ineligible_when_income_below_minimum():
 
 def test_minimums_use_avg_wage_when_profit_low():
     inp = Inputs(
-        income_czk=0,
         child_months_by_order=(),
         min_wage_czk=0,
-        expense_rate=Decimal("0.60"),
         section_15_allowances_czk=0,
         tax_rate=Decimal("0.15"),
         taxpayer_credit_czk=0,
@@ -89,7 +87,6 @@ def test_minimums_use_avg_wage_when_profit_low():
 
 def test_minimum_monthly_rounding_uses_ceiling():
     inp = Inputs(
-        income_czk=0,
         child_months_by_order=(),
         min_wage_czk=0,
         avg_wage_czk=101,
@@ -122,7 +119,6 @@ def test_minimums_match_official_values_2022_2026():
     for year, (expected_zp, expected_sp) in expected.items():
         cfg = year_defaults[year]
         inp = Inputs(
-            income_czk=0,
             child_months_by_order=(),
             min_wage_czk=0,
             avg_wage_czk=cfg["avg_wage_czk"],
@@ -139,7 +135,7 @@ def test_secondary_activity_below_threshold_pays_no_sp_and_no_zp_minimum():
     year_defaults = load_year_defaults("osvc_kalkulacka/data/year_defaults.toml", user_dir=".")
     sp_threshold = year_defaults[2025]["sp_threshold_secondary_czk"]
     inp = Inputs(
-        income_czk=200_000,
+        section_7_items=(Section7Item(income_czk=200_000, expense_rate=Decimal("0.60")),),
         child_months_by_order=(),
         min_wage_czk=0,
         avg_wage_czk=40_000,
@@ -160,7 +156,7 @@ def test_secondary_activity_above_threshold_uses_secondary_minimum():
     year_defaults = load_year_defaults("osvc_kalkulacka/data/year_defaults.toml", user_dir=".")
     sp_threshold = year_defaults[2025]["sp_threshold_secondary_czk"]
     inp = Inputs(
-        income_czk=500_000,
+        section_7_items=(Section7Item(income_czk=500_000, expense_rate=Decimal("0.60")),),
         child_months_by_order=(),
         min_wage_czk=0,
         avg_wage_czk=40_000,
@@ -173,3 +169,58 @@ def test_secondary_activity_above_threshold_uses_secondary_minimum():
 
     assert res.ins.sp_annual_payable_czk > 0
     assert res.ins.min_sp_monthly_czk > 0
+
+
+def test_section_7_items_and_other_bases_affect_tax_base():
+    inp = Inputs(
+        section_7_items=(
+            Section7Item(income_czk=100_000, expense_rate=Decimal("0.60")),
+            Section7Item(income_czk=200_000, expense_rate=Decimal("0.40")),
+        ),
+        child_months_by_order=(),
+        min_wage_czk=0,
+        section_15_allowances_czk=0,
+        par_6_base_czk=50_000,
+        par_8_base_czk=10_000,
+        par_9_base_czk=0,
+        par_10_base_czk=5_000,
+    )
+
+    res = compute(inp)
+
+    assert res.tax.expenses_czk == 140_000
+    assert res.tax.base_profit_czk == 160_000
+    assert res.tax.base_total_czk == 225_000
+    assert res.tax.tax_before_credits_czk == 33_750
+
+
+def test_section_7_items_rejects_unsupported_rate():
+    inp = Inputs(
+        section_7_items=(Section7Item(income_czk=100_000, expense_rate=Decimal("0.50")),),
+        child_months_by_order=(),
+        min_wage_czk=0,
+    )
+
+    with pytest.raises(ValueError):
+        compute(inp)
+
+
+def test_child_bonus_eligibility_includes_other_bases():
+    inp = Inputs(
+        section_7_items=(),
+        child_months_by_order=(12,),
+        min_wage_czk=20_000,
+        par_6_base_czk=120_000,
+        tax_rate=Decimal("0.15"),
+        taxpayer_credit_czk=0,
+        spouse_allowance_czk=0,
+        avg_wage_czk=0,
+        zp_rate=Decimal("0.135"),
+        sp_rate=Decimal("0.292"),
+        zp_min_base_share=Decimal("0.0"),
+        sp_min_base_share=Decimal("0.0"),
+    )
+
+    res = compute(inp)
+
+    assert res.tax.child_bonus_eligible is True

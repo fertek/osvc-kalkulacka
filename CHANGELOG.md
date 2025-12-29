@@ -4,6 +4,17 @@ Všechny významné změny v tomto projektu budou zaznamenány v tomto souboru.
 ## [Unreleased]
 - (zatim nic)
 
+## [0.8.0] - 2025-12-29
+### Přidáno
+- Podpora více §7 položek přes `section_7_items` v CLI i presetech.
+- Vstupy `par_6_base_czk`, `par_8_base_czk`, `par_9_base_czk`, `par_10_base_czk` pro dílčí základy (§6/8/9/10).
+
+### Změněno
+- Odstraněn `income_czk`/`expense_rate`; vstupy §7 jsou jen přes `section_7_items`.
+- Odstraněn implicitní 60% paušál; sazba je povinná u každé položky §7 a omezená na 40/60/80 %.
+- Test minimálních příjmů pro daňové zvýhodnění na děti vychází z příjmů §6+§7.
+- Přesnější popis záloh ZP/SP ve výstupu (pro následující období).
+
 ## [0.7.0] - 2025-12-28
 ### Přidáno
 - Příkaz `osvc presets import-epo` pro generování ročních presetů z EPO XML.

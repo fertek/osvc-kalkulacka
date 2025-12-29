@@ -7,8 +7,8 @@ D = Decimal
 
 USER_DEFAULTS = {
     "tax_rate": D("0.15"),
-    "expense_rate": D("0.60"),
 }
+ALLOWED_SECTION_7_RATES = (D("0.40"), D("0.60"), D("0.80"))
 
 
 def round_czk_half_up(x: Decimal) -> int:
@@ -36,6 +36,12 @@ def validate_rate_0_1(name: str, value: Decimal) -> None:
         raise ValueError(f"{name} musí být v intervalu 0.0–1.0.")
 
 
+def validate_section_7_rate(name: str, value: Decimal) -> None:
+    if value not in ALLOWED_SECTION_7_RATES:
+        allowed = ", ".join(str(rate) for rate in ALLOWED_SECTION_7_RATES)
+        raise ValueError(f"{name} musí být jedním z: {allowed}.")
+
+
 def compute_child_bonus_from_months(
     months_by_order: tuple[int, ...],
     tiers: tuple[int, int, int],
@@ -51,12 +57,17 @@ def compute_child_bonus_from_months(
 
 
 @dataclass(frozen=True)
+class Section7Item:
+    income_czk: int
+    expense_rate: Decimal
+
+
+@dataclass(frozen=True)
 class Inputs:
     # §7
-    income_czk: int
     child_months_by_order: tuple[int, ...]
     min_wage_czk: int
-    expense_rate: Decimal = D("0.60")
+    section_7_items: tuple[Section7Item, ...] = ()
 
     # §15 - nezdanitelné části základu daně
     section_15_allowances_czk: int = 0
@@ -65,6 +76,10 @@ class Inputs:
     tax_rate: Decimal = D("0.15")
     taxpayer_credit_czk: int = 30_840
     spouse_allowance_czk: int = 0
+    par_6_base_czk: int = 0
+    par_8_base_czk: int = 0
+    par_9_base_czk: int = 0
+    par_10_base_czk: int = 0
 
     # Dítě (zjednodušeně fixní roční částka na dítě)
     child_bonus_annual_tiers_czk: tuple[int, int, int] = (15_204, 22_320, 27_840)
@@ -86,6 +101,8 @@ class Inputs:
 class TaxResults:
     expenses_czk: int
     base_profit_czk: int
+    other_base_czk: int
+    base_total_czk: int
     section_15_allowances_czk: int
     base_after_deductions_czk: int
     base_rounded_czk: int
@@ -125,23 +142,33 @@ class Results:
 
 
 def compute_tax(inp: Inputs) -> TaxResults:
-    nonneg_int("income_czk", inp.income_czk)
     nonneg_int("section_15_allowances_czk", inp.section_15_allowances_czk)
     nonneg_int("taxpayer_credit_czk", inp.taxpayer_credit_czk)
     nonneg_int("spouse_allowance_czk", inp.spouse_allowance_czk)
+    nonneg_int("par_6_base_czk", inp.par_6_base_czk)
+    nonneg_int("par_8_base_czk", inp.par_8_base_czk)
+    nonneg_int("par_9_base_czk", inp.par_9_base_czk)
+    nonneg_int("par_10_base_czk", inp.par_10_base_czk)
 
     if len(inp.child_bonus_annual_tiers_czk) != 3:
         raise ValueError("child_bonus_annual_tiers_czk musí mít tři položky (1., 2., 3+ dítě).")
     for idx, amount in enumerate(inp.child_bonus_annual_tiers_czk, start=1):
         nonneg_int(f"child_bonus_tier_{idx}_czk", amount)
-    validate_rate_0_1("expense_rate", inp.expense_rate)
     validate_rate_0_1("tax_rate", inp.tax_rate)
+    income_total = 0
+    expenses = 0
+    for idx, item in enumerate(inp.section_7_items, start=1):
+        nonneg_int(f"section_7_items[{idx}].income_czk", item.income_czk)
+        validate_rate_0_1(f"section_7_items[{idx}].expense_rate", item.expense_rate)
+        validate_section_7_rate(f"section_7_items[{idx}].expense_rate", item.expense_rate)
+        income_total += item.income_czk
+        expenses += round_czk_half_up(D(item.income_czk) * item.expense_rate)
 
-    expenses = round_czk_half_up(D(inp.income_czk) * inp.expense_rate)
-    base_profit = inp.income_czk - expenses
-    base_profit = max(0, base_profit)
+    base_profit = max(0, income_total - expenses)
 
-    base_after = max(0, base_profit - inp.section_15_allowances_czk)
+    other_base = inp.par_6_base_czk + inp.par_8_base_czk + inp.par_9_base_czk + inp.par_10_base_czk
+    base_total = max(0, base_profit + other_base)
+    base_after = max(0, base_total - inp.section_15_allowances_czk)
 
     base_rounded = floor_to_hundreds(base_after)
     tax_before = round_czk_half_up(D(base_rounded) * inp.tax_rate)
@@ -155,7 +182,8 @@ def compute_tax(inp: Inputs) -> TaxResults:
             raise ValueError(f"child_months_by_order[{idx}] musí být 0–12.")
     has_child_claim = any(months > 0 for months in inp.child_months_by_order)
     min_income_for_bonus = inp.min_wage_czk * 6
-    child_bonus_eligible = not has_child_claim or inp.income_czk >= min_income_for_bonus
+    income_for_bonus = income_total + inp.par_6_base_czk
+    child_bonus_eligible = not has_child_claim or income_for_bonus >= min_income_for_bonus
     if child_bonus_eligible:
         child_bonus = compute_child_bonus_from_months(inp.child_months_by_order, inp.child_bonus_annual_tiers_czk)
     else:
@@ -167,6 +195,8 @@ def compute_tax(inp: Inputs) -> TaxResults:
     return TaxResults(
         expenses_czk=expenses,
         base_profit_czk=base_profit,
+        other_base_czk=other_base,
+        base_total_czk=base_total,
         section_15_allowances_czk=inp.section_15_allowances_czk,
         base_after_deductions_czk=base_after,
         base_rounded_czk=base_rounded,

@@ -35,7 +35,9 @@ def _presets_toml(year: int, income: int) -> str:
     return "\n".join(
         [
             f'["{year}"]',
-            f"income_czk = {income}",
+            "section_7_items = [",
+            f"  {{ income_czk = {income}, expense_rate = 0.60 }}",
+            "]",
             "child_months_by_order = [12]",
             "spouse_allowance = false",
             "",
@@ -92,7 +94,7 @@ def test_load_year_presets_cli_over_env_and_user(tmp_path, monkeypatch):
     monkeypatch.setenv("OSVC_PRESETS_PATH", str(env_path))
 
     data = cli.load_year_presets(str(cli_path), str(tmp_path))
-    assert data[2030]["income_czk"] == 111
+    assert data[2030]["section_7_items"][0]["income_czk"] == 111
 
 
 def test_load_year_presets_env_over_user(tmp_path, monkeypatch):
@@ -105,7 +107,7 @@ def test_load_year_presets_env_over_user(tmp_path, monkeypatch):
     monkeypatch.setenv("OSVC_PRESETS_PATH", str(env_path))
 
     data = cli.load_year_presets(None, str(tmp_path))
-    assert data[2031]["income_czk"] == 444
+    assert data[2031]["section_7_items"][0]["income_czk"] == 444
 
 
 def test_load_year_presets_user_dir(tmp_path, monkeypatch):
@@ -114,7 +116,7 @@ def test_load_year_presets_user_dir(tmp_path, monkeypatch):
     monkeypatch.delenv("OSVC_PRESETS_PATH", raising=False)
 
     data = cli.load_year_presets(None, str(tmp_path))
-    assert data[2032]["income_czk"] == 666
+    assert data[2032]["section_7_items"][0]["income_czk"] == 666
 
 
 def test_load_year_presets_missing(tmp_path, monkeypatch):
@@ -135,7 +137,9 @@ def test_preset_invalid_spouse_allowance_raises(tmp_path, monkeypatch):
         "\n".join(
             [
                 f'["{year}"]',
-                "income_czk = 1000",
+                "section_7_items = [",
+                "  { income_czk = 1000, expense_rate = 0.60 }",
+                "]",
                 "child_months_by_order = [12]",
                 'spouse_allowance = "yes"',
                 "",

@@ -7,7 +7,7 @@ import xml.etree.ElementTree as ET
 import pytest
 
 from osvc_kalkulacka.cli import load_year_defaults
-from osvc_kalkulacka.core import D, Inputs, USER_DEFAULTS, compute
+from osvc_kalkulacka.core import D, Inputs, Section7Item, USER_DEFAULTS, compute
 from osvc_kalkulacka.epo import compare_epo_to_calc, parse_epo_xml
 
 
@@ -28,15 +28,24 @@ def _build_inputs_from_xml(path: str, *, year_cfg: dict[str, object]) -> Inputs:
             return default
         return _as_int(el.attrib.get(name), default=default)
 
-    income_czk = attr("VetaT", "kc_prij7")
-    if income_czk is None:
-        raise AssertionError("VetaT@kc_prij7 chybí v testovacím XML.")
-
-    pr_sazba = attr("VetaT", "pr_sazba")
-    if pr_sazba is None:
-        expense_rate = USER_DEFAULTS["expense_rate"]
-    else:
-        expense_rate = D(str(Decimal(pr_sazba) / Decimal(100)))
+    section_items: list[Section7Item] = []
+    veta_t = doc.find("VetaT")
+    if veta_t is not None:
+        income_czk = attr("VetaT", "pr_prij7")
+        pr_sazba = attr("VetaT", "pr_sazba")
+        if income_czk is None or pr_sazba is None:
+            raise AssertionError("VetaT@pr_prij7 nebo VetaT@pr_sazba chybí v testovacím XML.")
+        section_items.append(
+            Section7Item(income_czk=income_czk, expense_rate=D(str(Decimal(pr_sazba) / Decimal(100))))
+        )
+        for idx, item in enumerate(doc.findall("Vetac"), start=1):
+            income_czk = _as_int(item.attrib.get("prijmy7"))
+            sazba_dal = _as_int(item.attrib.get("sazba_dal"))
+            if income_czk is None or sazba_dal is None:
+                raise AssertionError(f"Vetac[{idx}] musí obsahovat prijmy7 a sazba_dal.")
+            section_items.append(
+                Section7Item(income_czk=income_czk, expense_rate=D(str(Decimal(sazba_dal) / Decimal(100))))
+            )
 
     section_15_allowances_czk = attr("VetaS", "kc_odcelk", default=0) or 0
 
@@ -49,10 +58,9 @@ def _build_inputs_from_xml(path: str, *, year_cfg: dict[str, object]) -> Inputs:
     spouse_allowance = bool(spouse_months and spouse_months > 0)
 
     return Inputs(
-        income_czk=income_czk,
+        section_7_items=tuple(section_items),
         child_months_by_order=tuple(child_months),
         min_wage_czk=year_cfg["min_wage_czk"],
-        expense_rate=expense_rate,
         section_15_allowances_czk=section_15_allowances_czk,
         tax_rate=USER_DEFAULTS["tax_rate"],
         taxpayer_credit_czk=year_cfg["taxpayer_credit"],

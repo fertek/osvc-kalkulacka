@@ -11,8 +11,11 @@ import click
 from osvc_kalkulacka.core import (
     D,
     Inputs,
+    Section7Item,
     USER_DEFAULTS,
     compute,
+    round_czk_half_up,
+    validate_section_7_rate,
 )
 from osvc_kalkulacka.epo import compare_epo_to_calc, parse_epo_xml
 
@@ -103,12 +106,23 @@ def _ensure_int(value: object, *, name: str, year: int) -> int:
 
 
 def _ensure_decimal_0_1(value: object, *, name: str, year: int) -> D:
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
+    if isinstance(value, bool) or not isinstance(value, (int, float, Decimal, str)):
         raise SystemExit(f"Rok {year}: {name} musí být číslo (0.0–1.0).")
-    dec = D(str(value))
+    if isinstance(value, Decimal):
+        dec = value
+    else:
+        dec = D(str(value))
     if not (D("0") <= dec <= D("1")):
         raise SystemExit(f"Rok {year}: {name} musí být v intervalu 0.0–1.0.")
     return dec
+
+
+def _ensure_section_7_rate(value: D, *, name: str, year: int) -> D:
+    try:
+        validate_section_7_rate(name, value)
+    except ValueError as exc:
+        raise SystemExit(f"Rok {year}: {name} musí být 0.40, 0.60 nebo 0.80.") from exc
+    return value
 
 
 def _ensure_bool(value: object, *, name: str, year: int) -> bool:
@@ -124,6 +138,61 @@ def _ensure_activity(value: object, *, year: int) -> str:
     if activity not in ("primary", "secondary"):
         raise SystemExit(f"Rok {year}: activity musí být 'primary' nebo 'secondary'.")
     return activity
+
+
+def _parse_section7_item(raw: str, *, year: int) -> Section7Item:
+    parts = [part.strip() for part in raw.split(",") if part.strip()]
+    if not parts:
+        raise SystemExit("section7 položka nesmí být prázdná.")
+    data: dict[str, str] = {}
+    for part in parts:
+        if "=" not in part:
+            raise SystemExit("section7 položka musí být ve formátu income=...,rate=... (rate 0.40/0.60/0.80).")
+        key, value = part.split("=", 1)
+        key = key.strip()
+        value = value.strip()
+        if key in data:
+            raise SystemExit(f"section7 klíč {key!r} je zadán vícekrát.")
+        data[key] = value
+
+    allowed_keys = {"income", "rate"}
+    unknown = set(data.keys()) - allowed_keys
+    if unknown:
+        unknown_list = ", ".join(sorted(unknown))
+        raise SystemExit(f"section7 položka má neznámé klíče: {unknown_list}")
+    if "income" not in data or "rate" not in data:
+        raise SystemExit("section7 položka musí obsahovat income a rate (např. income=100000,rate=0.60).")
+
+    try:
+        income_raw = int(data["income"])
+    except ValueError as exc:
+        raise SystemExit("section7 income musí být celé číslo.") from exc
+    income_czk = _ensure_int(income_raw, name="section_7_items.income_czk", year=year)
+    rate = _ensure_decimal_0_1(data["rate"], name="section_7_items.expense_rate", year=year)
+    rate = _ensure_section_7_rate(rate, name="section_7_items.expense_rate", year=year)
+    return Section7Item(income_czk=income_czk, expense_rate=rate)
+
+
+def _parse_section7_items_from_preset(value: object, *, year: int) -> tuple[Section7Item, ...]:
+    if not isinstance(value, list):
+        raise SystemExit(f"Rok {year}: section_7_items musí být seznam položek.")
+    if not value:
+        raise SystemExit(f"Rok {year}: section_7_items nesmí být prázdný.")
+    items: list[Section7Item] = []
+    for idx, item in enumerate(value, start=1):
+        if not isinstance(item, dict):
+            raise SystemExit(f"Rok {year}: section_7_items[{idx}] musí být tabulka.")
+        unknown = set(item.keys()) - {"income_czk", "expense_rate"}
+        if unknown:
+            unknown_list = ", ".join(sorted(unknown))
+            raise SystemExit(f"Rok {year}: section_7_items[{idx}] neznámé klíče: {unknown_list}")
+        if "income_czk" not in item or "expense_rate" not in item:
+            raise SystemExit(f"Rok {year}: section_7_items[{idx}] musí mít income_czk a expense_rate.")
+        income_czk = _ensure_int(item.get("income_czk"), name="section_7_items.income_czk", year=year)
+        rate = _ensure_decimal_0_1(item.get("expense_rate"), name="section_7_items.expense_rate", year=year)
+        rate = _ensure_section_7_rate(rate, name="section_7_items.expense_rate", year=year)
+        items.append(Section7Item(income_czk=income_czk, expense_rate=rate))
+    return tuple(items)
 
 
 def _ensure_child_months(value: object, *, year: int) -> tuple[int, ...]:
@@ -159,6 +228,11 @@ def _toml_value(value: object) -> str:
         if value == value.to_integral_value():
             return str(int(value))
         return str(value)
+    if isinstance(value, dict):
+        parts = []
+        for key in sorted(value.keys()):
+            parts.append(f"{key} = {_toml_value(value[key])}")
+        return "{ " + ", ".join(parts) + " }"
     if isinstance(value, list):
         return "[" + ", ".join(_toml_value(item) for item in value) + "]"
     if isinstance(value, tuple):
@@ -171,12 +245,34 @@ def _toml_value(value: object) -> str:
 def _render_presets_toml(presets: dict[int, dict[str, object]]) -> str:
     lines: list[str] = []
     order = [
-        "income_czk",
+        "section_7_items",
         "section_15_allowances_czk",
         "child_months_by_order",
         "spouse_allowance",
         "activity",
+        "par_6_base_czk",
+        "par_8_base_czk",
+        "par_9_base_czk",
+        "par_10_base_czk",
     ]
+    def render_section_7_items(items: object) -> list[str]:
+        if not isinstance(items, (list, tuple)):
+            return [f"section_7_items = {_toml_value(items)}"]
+        out_lines = ["section_7_items = ["]
+        for item in items:
+            if isinstance(item, dict) and "income_czk" in item and "expense_rate" in item:
+                extra = [key for key in item.keys() if key not in ("income_czk", "expense_rate")]
+                if extra:
+                    out_lines.append(f"  {_toml_value(item)}")
+                else:
+                    income = _toml_value(item["income_czk"])
+                    rate = _toml_value(item["expense_rate"])
+                    out_lines.append(f"  {{ income_czk = {income}, expense_rate = {rate} }}")
+            else:
+                out_lines.append(f"  {_toml_value(item)}")
+        out_lines.append("]")
+        return out_lines
+
     for idx, year in enumerate(sorted(presets)):
         if idx:
             lines.append("")
@@ -184,7 +280,10 @@ def _render_presets_toml(presets: dict[int, dict[str, object]]) -> str:
         preset = presets[year]
         for key in order:
             if key in preset:
-                lines.append(f"{key} = {_toml_value(preset[key])}")
+                if key == "section_7_items":
+                    lines.extend(render_section_7_items(preset[key]))
+                else:
+                    lines.append(f"{key} = {_toml_value(preset[key])}")
         extra_keys = sorted(k for k in preset.keys() if k not in order)
         for key in extra_keys:
             lines.append(f"{key} = {_toml_value(preset[key])}")
@@ -207,13 +306,17 @@ def _normalize_year_presets(data: dict[str, object]) -> dict[int, dict[str, obje
 def _build_inputs(
     *,
     year: int,
-    income: int | None,
+    section_7_items: tuple[str, ...] | None,
     presets: str | None,
     defaults: str | None,
     section_15_allowances: int | None,
     child_months_by_order: str | None,
     spouse_allowance: bool | None,
     activity: str | None,
+    par_6_base_czk: int | None,
+    par_8_base_czk: int | None,
+    par_9_base_czk: int | None,
+    par_10_base_czk: int | None,
 ) -> Inputs:
     user_dir = get_user_dir()
 
@@ -230,13 +333,16 @@ def _build_inputs(
 
     year_presets = load_year_presets(presets, user_dir)
     preset = year_presets.get(year, {})
-    if income is not None:
-        income_czk = income
-    else:
-        preset_income = preset.get("income_czk")
-        if preset_income is None:
-            raise SystemExit("Chybí příjmy. Zadej --income nebo doplň preset pro daný rok.")
-        income_czk = _ensure_int(preset_income, name="income_czk", year=year)
+    if "income_czk" in preset:
+        raise SystemExit("Preset obsahuje income_czk; to už není podporováno. Použij section_7_items.")
+    section_7_items_tuple: tuple[Section7Item, ...] | None = None
+    if section_7_items:
+        section_7_items_tuple = tuple(_parse_section7_item(item, year=year) for item in section_7_items)
+    elif "section_7_items" in preset:
+        section_7_items_tuple = _parse_section7_items_from_preset(preset.get("section_7_items"), year=year)
+
+    if section_7_items_tuple is None:
+        section_7_items_tuple = ()
 
     if section_15_allowances is not None:
         section_15_allowances_czk = section_15_allowances
@@ -276,15 +382,27 @@ def _build_inputs(
     if activity not in ("primary", "secondary"):
         raise SystemExit("activity musí být primary nebo secondary.")
 
+    if par_6_base_czk is None:
+        par_6_base_czk = _ensure_int(preset.get("par_6_base_czk", 0), name="par_6_base_czk", year=year)
+    if par_8_base_czk is None:
+        par_8_base_czk = _ensure_int(preset.get("par_8_base_czk", 0), name="par_8_base_czk", year=year)
+    if par_9_base_czk is None:
+        par_9_base_czk = _ensure_int(preset.get("par_9_base_czk", 0), name="par_9_base_czk", year=year)
+    if par_10_base_czk is None:
+        par_10_base_czk = _ensure_int(preset.get("par_10_base_czk", 0), name="par_10_base_czk", year=year)
+
     return Inputs(
-        income_czk=income_czk,
         child_months_by_order=child_months_by_order_tuple,
         min_wage_czk=year_cfg["min_wage_czk"],
-        expense_rate=USER_DEFAULTS["expense_rate"],
+        section_7_items=section_7_items_tuple,
         section_15_allowances_czk=section_15_allowances_czk,
         tax_rate=USER_DEFAULTS["tax_rate"],
         taxpayer_credit_czk=year_cfg["taxpayer_credit"],
         spouse_allowance_czk=year_cfg["spouse_allowance"] if spouse_allowance else 0,
+        par_6_base_czk=par_6_base_czk,
+        par_8_base_czk=par_8_base_czk,
+        par_9_base_czk=par_9_base_czk,
+        par_10_base_czk=par_10_base_czk,
         child_bonus_annual_tiers_czk=year_cfg["child_bonus_annual_tiers"],
         avg_wage_czk=year_cfg["avg_wage_czk"],
         zp_min_base_share=D("0.50"),
@@ -392,14 +510,20 @@ def _results_as_dict(inp: Inputs, res) -> dict[str, object]:
     return {
         "inputs": {
             "activity_type": inp.activity_type,
-            "income_czk": inp.income_czk,
+            "section_7_items": [
+                {"income_czk": item.income_czk, "expense_rate": str(item.expense_rate)}
+                for item in inp.section_7_items
+            ],
             "child_months_by_order": list(inp.child_months_by_order),
             "min_wage_czk": inp.min_wage_czk,
-            "expense_rate": str(inp.expense_rate),
             "section_15_allowances_czk": inp.section_15_allowances_czk,
             "tax_rate": str(inp.tax_rate),
             "taxpayer_credit_czk": inp.taxpayer_credit_czk,
             "spouse_allowance_czk": inp.spouse_allowance_czk,
+            "par_6_base_czk": inp.par_6_base_czk,
+            "par_8_base_czk": inp.par_8_base_czk,
+            "par_9_base_czk": inp.par_9_base_czk,
+            "par_10_base_czk": inp.par_10_base_czk,
             "child_bonus_annual_tiers_czk": list(inp.child_bonus_annual_tiers_czk),
             "avg_wage_czk": inp.avg_wage_czk,
             "zp_rate": str(inp.zp_rate),
@@ -414,6 +538,8 @@ def _results_as_dict(inp: Inputs, res) -> dict[str, object]:
         "tax": {
             "expenses_czk": res.tax.expenses_czk,
             "base_profit_czk": res.tax.base_profit_czk,
+            "other_base_czk": res.tax.other_base_czk,
+            "base_total_czk": res.tax.base_total_czk,
             "section_15_allowances_czk": res.tax.section_15_allowances_czk,
             "base_after_deductions_czk": res.tax.base_after_deductions_czk,
             "base_rounded_czk": res.tax.base_rounded_czk,
@@ -455,9 +581,22 @@ def _render_calc_output(inp: Inputs, res, year: int, output_format: str) -> None
     print()
 
     print("DPFO (daň z příjmů)")
-    print_row("Příjmy (§7):", inp.income_czk)
-    print_row(f"Výdaje paušálem ({(inp.expense_rate * 100)}%):", res.tax.expenses_czk)
+    section_7_income = sum(item.income_czk for item in inp.section_7_items)
+    print_row("Příjmy (§7):", section_7_income)
+    if inp.section_7_items:
+        for idx, item in enumerate(inp.section_7_items, start=1):
+            rate_percent = int((item.expense_rate * D("100")).to_integral_value())
+            item_expenses = round_czk_half_up(D(item.income_czk) * item.expense_rate)
+            print_row(f"  Položka {idx} – příjmy:", item.income_czk)
+            print_row(f"  Položka {idx} – výdaje ({rate_percent}%):", item_expenses)
+    print_row("Výdaje paušálem (celkem):", res.tax.expenses_czk)
     print_row("Zisk / základ (§7):", res.tax.base_profit_czk)
+    if res.tax.other_base_czk > 0:
+        print_row("Dílčí základ (§6):", inp.par_6_base_czk)
+        print_row("Dílčí základ (§8):", inp.par_8_base_czk)
+        print_row("Dílčí základ (§9):", inp.par_9_base_czk)
+        print_row("Dílčí základ (§10):", inp.par_10_base_czk)
+        print_row("Součet dílčích základů:", res.tax.base_total_czk)
     print()
     print_row("Nezdanitelné části základu daně (§15):", res.tax.section_15_allowances_czk)
     print_row("Základ po odpočtu §15:", res.tax.base_after_deductions_czk)
@@ -496,7 +635,7 @@ def _render_calc_output(inp: Inputs, res, year: int, output_format: str) -> None
     print_row("  Ročně (13,5 % z VZ):", res.ins.zp_annual_czk)
     print_row("  Měsíčně vypočteno (roční/12):", res.ins.zp_monthly_calc_czk)
     print_row(f"  Minimální záloha ({year}):", res.ins.min_zp_monthly_czk)
-    print_row("  Měsíční záloha k placení:", res.ins.zp_monthly_payable_czk)
+    print_row("  Měsíční záloha k placení (pro následující období):", res.ins.zp_monthly_payable_czk)
     print_row("  Ročně zaplaceno na zálohách:", res.ins.zp_annual_payable_czk)
     print()
 
@@ -506,7 +645,7 @@ def _render_calc_output(inp: Inputs, res, year: int, output_format: str) -> None
     print_row("  Ročně (29,2 % z VZ):", res.ins.sp_annual_czk)
     print_row("  Měsíčně vypočteno (roční/12):", res.ins.sp_monthly_calc_czk)
     print_row(f"  Minimální záloha ({year}):", res.ins.min_sp_monthly_czk)
-    print_row("  Měsíční záloha k placení:", res.ins.sp_monthly_payable_czk)
+    print_row("  Měsíční záloha k placení (pro následující období):", res.ins.sp_monthly_payable_czk)
     print_row("  Ročně zaplaceno na zálohách:", res.ins.sp_annual_payable_czk)
 
     print("-" * 70)
@@ -531,7 +670,12 @@ def _render_calc_output(inp: Inputs, res, year: int, output_format: str) -> None
     required=False,
     help="Rok daňového přiznání (zdaňovací období). Když není zadán, vezme se z EPO XML.",
 )
-@click.option("--income", type=int, default=None, help="Příjmy (§7) v Kč za rok.")
+@click.option(
+    "--section7",
+    "section_7_items",
+    multiple=True,
+    help="Položka §7 (opakovatelně). Formát: income=...,rate=...; rate je 0.40/0.60/0.80.",
+)
 @click.option(
     "--presets",
     type=str,
@@ -567,6 +711,10 @@ def _render_calc_output(inp: Inputs, res, year: int, output_format: str) -> None
     default=None,
     help="Typ samostatné výdělečné činnosti (primary/secondary).",
 )
+@click.option("--par-6-base", type=int, default=None, help="Dílčí základ daně (§6) v Kč.")
+@click.option("--par-8-base", type=int, default=None, help="Dílčí základ daně (§8) v Kč.")
+@click.option("--par-9-base", type=int, default=None, help="Dílčí základ daně (§9) v Kč.")
+@click.option("--par-10-base", type=int, default=None, help="Dílčí základ daně (§10) v Kč.")
 @click.option(
     "--format",
     "output_format",
@@ -579,13 +727,17 @@ def _render_calc_output(inp: Inputs, res, year: int, output_format: str) -> None
 def cli(
     ctx: click.Context,
     year: int | None,
-    income: int | None,
+    section_7_items: tuple[str, ...],
     presets: str | None,
     defaults: str | None,
     section_15_allowances: int | None,
     child_months_by_order: str | None,
     spouse_allowance: bool | None,
     activity: str | None,
+    par_6_base: int | None,
+    par_8_base: int | None,
+    par_9_base: int | None,
+    par_10_base: int | None,
     output_format: str,
 ) -> None:
     """OSVČ kalkulačka (DPFO + ZP/SP), zjednodušený výpočet."""
@@ -596,13 +748,17 @@ def cli(
 
     inp = _build_inputs(
         year=year,
-        income=income,
+        section_7_items=section_7_items,
         presets=presets,
         defaults=defaults,
         section_15_allowances=section_15_allowances,
         child_months_by_order=child_months_by_order,
         spouse_allowance=spouse_allowance,
         activity=activity,
+        par_6_base_czk=par_6_base,
+        par_8_base_czk=par_8_base,
+        par_9_base_czk=par_9_base,
+        par_10_base_czk=par_10_base,
     )
     res = compute(inp)
     _render_calc_output(inp, res, year, output_format)
@@ -611,7 +767,12 @@ def cli(
 @cli.command()
 @click.option("--year", type=int, required=False, help="Rok daňového přiznání (zdaňovací období).")
 @click.option("--epo", "epo_path", type=click.Path(exists=True, dir_okay=False), required=True)
-@click.option("--income", type=int, default=None, help="Příjmy (§7) v Kč za rok.")
+@click.option(
+    "--section7",
+    "section_7_items",
+    multiple=True,
+    help="Položka §7 (opakovatelně). Formát: income=...,rate=...; rate je 0.40/0.60/0.80.",
+)
 @click.option(
     "--presets",
     type=str,
@@ -647,16 +808,24 @@ def cli(
     default=None,
     help="Typ samostatné výdělečné činnosti (primary/secondary).",
 )
+@click.option("--par-6-base", type=int, default=None, help="Dílčí základ daně (§6) v Kč.")
+@click.option("--par-8-base", type=int, default=None, help="Dílčí základ daně (§8) v Kč.")
+@click.option("--par-9-base", type=int, default=None, help="Dílčí základ daně (§9) v Kč.")
+@click.option("--par-10-base", type=int, default=None, help="Dílčí základ daně (§10) v Kč.")
 def verify(
     year: int | None,
     epo_path: str,
-    income: int | None,
+    section_7_items: tuple[str, ...],
     presets: str | None,
     defaults: str | None,
     section_15_allowances: int | None,
     child_months_by_order: str | None,
     spouse_allowance: bool | None,
     activity: str | None,
+    par_6_base: int | None,
+    par_8_base: int | None,
+    par_9_base: int | None,
+    par_10_base: int | None,
 ) -> None:
     epo = parse_epo_xml(epo_path)
     if year is None:
@@ -665,13 +834,17 @@ def verify(
         year = epo.year
     inp = _build_inputs(
         year=year,
-        income=income,
+        section_7_items=section_7_items,
         presets=presets,
         defaults=defaults,
         section_15_allowances=section_15_allowances,
         child_months_by_order=child_months_by_order,
         spouse_allowance=spouse_allowance,
         activity=activity,
+        par_6_base_czk=par_6_base,
+        par_8_base_czk=par_8_base,
+        par_9_base_czk=par_9_base,
+        par_10_base_czk=par_10_base,
     )
     res = compute(inp)
     diffs = compare_epo_to_calc(epo, inp, res, expected_year=year)
@@ -771,6 +944,7 @@ def presets_import_epo(
     activity: str | None,
     output_default: bool,
 ) -> None:
+    """Importuje DAP (EPO XML) jako preset; §7 se mapuje na section_7_items."""
     if output and output_default:
         raise SystemExit("Nelze kombinovat --output a --output-default.")
     epo = parse_epo_xml(epo_path)
@@ -778,10 +952,10 @@ def presets_import_epo(
         raise SystemExit("V EPO XML chybí rok.")
 
     values = epo.values
-    income = values.get("income_czk")
-    if income is None:
-        raise SystemExit("V EPO XML chybí příjmy (income_czk).")
-    income_czk = _ensure_int_from_epo(income, name="income_czk", year=epo.year)
+    section_7_items = [
+        {"income_czk": item.income_czk, "expense_rate": item.expense_rate}
+        for item in epo.section_7_items
+    ]
 
     section_15_raw = values.get("section_15_allowances_czk", 0)
     section_15_allowances_czk = _ensure_int_from_epo(
@@ -806,11 +980,25 @@ def presets_import_epo(
     else:
         raise SystemExit("V EPO XML má spouse_credit_applied_czk neplatný formát.")
 
+    par_6_base_raw = values.get("par_6_base_czk", 0) or 0
+    par_8_base_raw = values.get("par_8_base_czk", 0) or 0
+    par_9_base_raw = values.get("par_9_base_czk", 0) or 0
+    par_10_base_raw = values.get("par_10_base_czk", 0) or 0
+
+    par_6_base_czk = _ensure_int_from_epo(par_6_base_raw, name="par_6_base_czk", year=epo.year)
+    par_8_base_czk = _ensure_int_from_epo(par_8_base_raw, name="par_8_base_czk", year=epo.year)
+    par_9_base_czk = _ensure_int_from_epo(par_9_base_raw, name="par_9_base_czk", year=epo.year)
+    par_10_base_czk = _ensure_int_from_epo(par_10_base_raw, name="par_10_base_czk", year=epo.year)
+
     preset: dict[str, object] = {
-        "income_czk": income_czk,
+        "section_7_items": section_7_items,
         "section_15_allowances_czk": section_15_allowances_czk,
         "child_months_by_order": child_months_by_order,
         "spouse_allowance": spouse_allowance,
+        "par_6_base_czk": par_6_base_czk,
+        "par_8_base_czk": par_8_base_czk,
+        "par_9_base_czk": par_9_base_czk,
+        "par_10_base_czk": par_10_base_czk,
     }
     if activity is not None:
         preset["activity"] = activity.lower()
