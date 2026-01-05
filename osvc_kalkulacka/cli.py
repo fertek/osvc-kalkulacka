@@ -13,6 +13,7 @@ from osvc_kalkulacka.core import (
     Inputs,
     Section7Item,
     USER_DEFAULTS,
+    ceil_czk,
     compute,
     round_czk_half_up,
     validate_section_7_rate,
@@ -39,6 +40,15 @@ def print_row(label: str, value: int | str, *, suffix: str = "Kč", label_width:
 def print_row_text(label: str, value: str, *, label_width: int = 40) -> None:
     """Print a row where value is already formatted text (no suffix)."""
     print_row(label, value, suffix="", label_width=label_width)
+
+
+def format_settlement(amount: int) -> str:
+    """Format settlement as doplatek/přeplatek text."""
+    if amount > 0:
+        return f"doplatek {fmt(amount)} Kč"
+    if amount < 0:
+        return f"přeplatek {fmt(abs(amount))} Kč"
+    return "0 Kč"
 
 
 def get_user_dir() -> str:
@@ -103,6 +113,20 @@ def _ensure_int(value: object, *, name: str, year: int) -> int:
     if value < 0:
         raise SystemExit(f"Rok {year}: {name} nesmí být záporné.")
     return value
+
+
+def _resolve_paid_amount(
+    cli_value: int | None,
+    preset: dict[str, object],
+    *,
+    key: str,
+    year: int,
+) -> int | None:
+    if cli_value is not None:
+        return _ensure_int(cli_value, name=key, year=year)
+    if key in preset:
+        return _ensure_int(preset.get(key), name=key, year=year)
+    return None
 
 
 def _ensure_decimal_0_1(value: object, *, name: str, year: int) -> D:
@@ -317,7 +341,10 @@ def _build_inputs(
     par_8_base_czk: int | None,
     par_9_base_czk: int | None,
     par_10_base_czk: int | None,
-) -> Inputs:
+    paid_tax_czk: int | None,
+    paid_zp_czk: int | None,
+    paid_sp_czk: int | None,
+) -> tuple[Inputs, dict[int, dict[str, object]], dict[str, int | None]]:
     user_dir = get_user_dir()
 
     year_defaults = load_year_defaults(defaults, user_dir)
@@ -391,6 +418,12 @@ def _build_inputs(
     if par_10_base_czk is None:
         par_10_base_czk = _ensure_int(preset.get("par_10_base_czk", 0), name="par_10_base_czk", year=year)
 
+    paid = {
+        "paid_tax_czk": _resolve_paid_amount(paid_tax_czk, preset, key="paid_tax_czk", year=year),
+        "paid_zp_czk": _resolve_paid_amount(paid_zp_czk, preset, key="paid_zp_czk", year=year),
+        "paid_sp_czk": _resolve_paid_amount(paid_sp_czk, preset, key="paid_sp_czk", year=year),
+    }
+
     return Inputs(
         child_months_by_order=child_months_by_order_tuple,
         min_wage_czk=year_cfg["min_wage_czk"],
@@ -411,7 +444,7 @@ def _build_inputs(
         sp_min_base_share_secondary=year_cfg["sp_min_base_share_secondary"],
         sp_threshold_secondary_czk=year_cfg["sp_threshold_secondary_czk"],
         activity_type=activity,
-    )
+    ), year_defaults, paid
 
 
 def load_year_defaults(path: str | None, user_dir: str) -> dict[int, dict[str, object]]:
@@ -506,7 +539,30 @@ def _json_dump(payload: object) -> None:
     click.echo(json.dumps(payload, ensure_ascii=True, indent=2, default=str))
 
 
-def _results_as_dict(inp: Inputs, res) -> dict[str, object]:
+def _results_as_dict(
+    inp: Inputs,
+    res,
+    *,
+    paid: dict[str, int | None] | None = None,
+    next_year: int | None = None,
+    next_year_min_zp_monthly_czk: int | None = None,
+    next_year_min_sp_monthly_czk: int | None = None,
+    zp_post_overview_monthly_czk: int | None = None,
+    sp_post_overview_monthly_czk: int | None = None,
+) -> dict[str, object]:
+    paid_values = paid or {"paid_tax_czk": None, "paid_zp_czk": None, "paid_sp_czk": None}
+    tax_paid = paid_values["paid_tax_czk"] if paid_values["paid_tax_czk"] is not None else 0
+    zp_paid = paid_values["paid_zp_czk"]
+    sp_paid = paid_values["paid_sp_czk"]
+    zp_settlement_base = zp_paid if zp_paid is not None else res.ins.zp_annual_prescribed_czk
+    sp_settlement_base = sp_paid if sp_paid is not None else res.ins.sp_annual_prescribed_czk
+    tax_settlement = res.tax.tax_final_czk - tax_paid
+    zp_settlement = res.ins.zp_annual_payable_czk - zp_settlement_base
+    sp_settlement = res.ins.sp_annual_payable_czk - sp_settlement_base
+    settlement_is_estimate = any(value is None for value in paid_values.values())
+    zp_settlement_basis = "paid" if zp_paid is not None else "prescribed"
+    sp_settlement_basis = "paid" if sp_paid is not None else "prescribed"
+    tax_settlement_basis = "paid" if paid_values["paid_tax_czk"] is not None else "prescribed"
     return {
         "inputs": {
             "activity_type": inp.activity_type,
@@ -552,6 +608,9 @@ def _results_as_dict(inp: Inputs, res) -> dict[str, object]:
             "child_bonus_min_income_czk": res.tax.child_bonus_min_income_czk,
             "tax_final_czk": res.tax.tax_final_czk,
             "bonus_to_pay_czk": res.tax.bonus_to_pay_czk,
+            "paid_tax_czk": paid_values["paid_tax_czk"],
+            "tax_settlement_czk": tax_settlement,
+            "tax_settlement_basis": tax_settlement_basis,
         },
         "insurance": {
             "vym_base_czk": res.ins.vym_base_czk,
@@ -561,18 +620,105 @@ def _results_as_dict(inp: Inputs, res) -> dict[str, object]:
             "zp_monthly_calc_czk": res.ins.zp_monthly_calc_czk,
             "zp_monthly_payable_czk": res.ins.zp_monthly_payable_czk,
             "zp_annual_payable_czk": res.ins.zp_annual_payable_czk,
+            "zp_annual_prescribed_czk": res.ins.zp_annual_prescribed_czk,
+            "zp_annual_settlement_czk": zp_settlement,
+            "zp_settlement_basis": zp_settlement_basis,
+            "paid_zp_czk": zp_paid,
+            "zp_post_overview_monthly_czk": zp_post_overview_monthly_czk,
             "sp_annual_czk": res.ins.sp_annual_czk,
             "sp_monthly_calc_czk": res.ins.sp_monthly_calc_czk,
             "sp_monthly_payable_czk": res.ins.sp_monthly_payable_czk,
             "sp_annual_payable_czk": res.ins.sp_annual_payable_czk,
+            "sp_annual_prescribed_czk": res.ins.sp_annual_prescribed_czk,
+            "sp_annual_settlement_czk": sp_settlement,
+            "sp_settlement_basis": sp_settlement_basis,
+            "paid_sp_czk": sp_paid,
+            "sp_post_overview_monthly_czk": sp_post_overview_monthly_czk,
+            "next_year_minima": (
+                {
+                    "year": next_year,
+                    "min_zp_monthly_czk": next_year_min_zp_monthly_czk,
+                    "min_sp_monthly_czk": next_year_min_sp_monthly_czk,
+                }
+                if next_year is not None
+                else None
+            ),
+        },
+        "settlement": {
+            "total_settlement_czk": tax_settlement + zp_settlement + sp_settlement,
+            "is_estimate": settlement_is_estimate,
         },
     }
 
 
-def _render_calc_output(inp: Inputs, res, year: int, output_format: str) -> None:
+def _render_calc_output(
+    inp: Inputs,
+    res,
+    year: int,
+    output_format: str,
+    year_defaults: dict[int, dict[str, object]],
+    paid: dict[str, int | None],
+) -> None:
+    next_year = year + 1
+    next_year_cfg = year_defaults.get(next_year)
+    next_year_min_zp_monthly_czk = None
+    next_year_min_sp_monthly_czk = None
+    zp_post_overview_monthly_czk = None
+    sp_post_overview_monthly_czk = None
+    if next_year_cfg is not None:
+        avg_wage_czk = next_year_cfg["avg_wage_czk"]
+        zp_annual_min = 0
+        sp_annual_min = 0
+        sp_due_next = True
+        if inp.activity_type == "secondary":
+            next_year_min_zp_monthly_czk = 0
+            sp_due_next = res.tax.base_profit_czk > next_year_cfg["sp_threshold_secondary_czk"]
+            if sp_due_next:
+                sp_annual_min = ceil_czk(
+                    D(str(avg_wage_czk))
+                    * next_year_cfg["sp_min_base_share_secondary"]
+                    * inp.sp_rate
+                    * D("12")
+                )
+                next_year_min_sp_monthly_czk = ceil_czk(D(sp_annual_min) / D("12"))
+            else:
+                next_year_min_sp_monthly_czk = 0
+        else:
+            zp_annual_min = ceil_czk(
+                D(str(avg_wage_czk)) * inp.zp_min_base_share * inp.zp_rate * D("12")
+            )
+            sp_annual_min = ceil_czk(
+                D(str(avg_wage_czk)) * next_year_cfg["sp_min_base_share"] * inp.sp_rate * D("12")
+            )
+            next_year_min_zp_monthly_czk = ceil_czk(D(zp_annual_min) / D("12"))
+            next_year_min_sp_monthly_czk = ceil_czk(D(sp_annual_min) / D("12"))
+        zp_post_overview_annual = max(res.ins.zp_annual_czk, zp_annual_min)
+        zp_post_overview_monthly_czk = ceil_czk(D(zp_post_overview_annual) / D("12")) if zp_post_overview_annual else 0
+        if sp_due_next:
+            sp_post_overview_annual = max(res.ins.sp_annual_czk, sp_annual_min)
+            sp_post_overview_monthly_czk = (
+                ceil_czk(D(sp_post_overview_annual) / D("12")) if sp_post_overview_annual else 0
+            )
+        else:
+            sp_post_overview_monthly_czk = 0
     if output_format == "json":
-        _json_dump(_results_as_dict(inp, res))
+        _json_dump(
+            _results_as_dict(
+                inp,
+                res,
+                paid=paid,
+                next_year=next_year if next_year_cfg is not None else None,
+                next_year_min_zp_monthly_czk=next_year_min_zp_monthly_czk,
+                next_year_min_sp_monthly_czk=next_year_min_sp_monthly_czk,
+                zp_post_overview_monthly_czk=zp_post_overview_monthly_czk,
+                sp_post_overview_monthly_czk=sp_post_overview_monthly_czk,
+            )
+        )
         return
+
+    tax_paid = paid["paid_tax_czk"] if paid["paid_tax_czk"] is not None else 0
+    tax_label = "Doplatek na dani:" if paid["paid_tax_czk"] is not None else "Doplatek na dani (odhad):"
+    tax_settlement = res.tax.tax_final_czk - tax_paid
 
     print("OSVČ kalkulačka – DPFO + pojistné (zjednodušený výpočet)")
     print("-" * 70)
@@ -620,6 +766,9 @@ def _render_calc_output(inp: Inputs, res, year: int, output_format: str) -> None
     print_row("  Z toho použito na snížení daně:", child_used_for_tax)
     print_row("Daňový bonus vyplacený (-):", res.tax.bonus_to_pay_czk)
     print_row("Daň k úhradě po dětech:", res.tax.tax_final_czk)
+    if paid["paid_tax_czk"] is not None:
+        print_row("Zaplacené zálohy na daň:", paid["paid_tax_czk"])
+    print_row_text(tax_label, format_settlement(tax_settlement))
 
     print("-" * 70)
 
@@ -628,6 +777,9 @@ def _render_calc_output(inp: Inputs, res, year: int, output_format: str) -> None
         print("(Pozn.: pokud výpočet vychází pod minimem, platí se minimální zálohy.)")
     else:
         print("(Pozn.: vedlejší činnost – ZP bez minima, SP jen nad rozhodnou částku.)")
+    print("Pozn.: Záloha dle přehledu platí od měsíce následujícího po podání přehledu (ZP i SP).")
+    print("Pozn.: Od ledna se vždy uplatní nová minimální záloha pro daný rok.")
+    print("Pozn.: Zálohy do podání přehledu vycházejí z posledního přehledu nebo minima.")
     print_row("Vyměřovací základ (50 % zisku):", res.ins.vym_base_czk)
     print()
 
@@ -635,8 +787,22 @@ def _render_calc_output(inp: Inputs, res, year: int, output_format: str) -> None
     print_row("  Ročně (13,5 % z VZ):", res.ins.zp_annual_czk)
     print_row("  Měsíčně vypočteno (roční/12):", res.ins.zp_monthly_calc_czk)
     print_row(f"  Minimální záloha ({year}):", res.ins.min_zp_monthly_czk)
-    print_row("  Měsíční záloha k placení (pro následující období):", res.ins.zp_monthly_payable_czk)
-    print_row("  Ročně zaplaceno na zálohách:", res.ins.zp_annual_payable_czk)
+    if next_year_min_zp_monthly_czk is not None:
+        print_row(f"  Minimální záloha od 1.1.{next_year}:", next_year_min_zp_monthly_czk)
+    print_row(
+        f"  Záloha podle přehledu za {year} (od měsíce po podání):",
+        zp_post_overview_monthly_czk
+        if zp_post_overview_monthly_czk is not None
+        else res.ins.zp_monthly_payable_czk,
+    )
+    print_row("  Pojistné po zohlednění minima:", res.ins.zp_annual_payable_czk)
+    print_row("  Předepsané zálohy za rok:", res.ins.zp_annual_prescribed_czk)
+    if paid["paid_zp_czk"] is not None:
+        print_row("  Zaplacené zálohy za rok:", paid["paid_zp_czk"])
+    zp_settlement_base = paid["paid_zp_czk"] if paid["paid_zp_czk"] is not None else res.ins.zp_annual_prescribed_czk
+    zp_settlement = res.ins.zp_annual_payable_czk - zp_settlement_base
+    zp_label = "  Doplatek po přehledu:" if paid["paid_zp_czk"] is not None else "  Doplatek po přehledu (odhad):"
+    print_row_text(zp_label, format_settlement(zp_settlement))
     print()
 
     print("Sociální pojištění (SP)")
@@ -645,21 +811,42 @@ def _render_calc_output(inp: Inputs, res, year: int, output_format: str) -> None
     print_row("  Ročně (29,2 % z VZ):", res.ins.sp_annual_czk)
     print_row("  Měsíčně vypočteno (roční/12):", res.ins.sp_monthly_calc_czk)
     print_row(f"  Minimální záloha ({year}):", res.ins.min_sp_monthly_czk)
-    print_row("  Měsíční záloha k placení (pro následující období):", res.ins.sp_monthly_payable_czk)
-    print_row("  Ročně zaplaceno na zálohách:", res.ins.sp_annual_payable_czk)
+    if next_year_min_sp_monthly_czk is not None:
+        print_row(f"  Minimální záloha od 1.1.{next_year}:", next_year_min_sp_monthly_czk)
+    print_row(
+        f"  Záloha podle přehledu za {year} (od měsíce po podání):",
+        sp_post_overview_monthly_czk
+        if sp_post_overview_monthly_czk is not None
+        else res.ins.sp_monthly_payable_czk,
+    )
+    print_row("  Pojistné po zohlednění minima:", res.ins.sp_annual_payable_czk)
+    print_row("  Předepsané zálohy za rok:", res.ins.sp_annual_prescribed_czk)
+    if paid["paid_sp_czk"] is not None:
+        print_row("  Zaplacené zálohy za rok:", paid["paid_sp_czk"])
+    sp_settlement_base = paid["paid_sp_czk"] if paid["paid_sp_czk"] is not None else res.ins.sp_annual_prescribed_czk
+    sp_settlement = res.ins.sp_annual_payable_czk - sp_settlement_base
+    sp_label = "  Doplatek po přehledu:" if paid["paid_sp_czk"] is not None else "  Doplatek po přehledu (odhad):"
+    print_row_text(sp_label, format_settlement(sp_settlement))
 
     print("-" * 70)
 
-    total_out = res.tax.tax_final_czk + res.ins.zp_annual_payable_czk + res.ins.sp_annual_payable_czk
-    total_net = total_out - res.tax.bonus_to_pay_czk
+    zp_settlement_total = zp_settlement
+    sp_settlement_total = sp_settlement
+    total_settlement = tax_settlement + zp_settlement_total + sp_settlement_total
 
     print("Souhrn (ročně)")
     print_row("Daň k úhradě:", res.tax.tax_final_czk)
-    print_row("ZP – zálohy zaplacené za rok:", res.ins.zp_annual_payable_czk)
-    print_row("SP – zálohy zaplacené za rok:", res.ins.sp_annual_payable_czk)
-    print_row("Celkem k platbě:", total_out)
+    if paid["paid_tax_czk"] is not None:
+        print_row("Zaplacené zálohy na daň:", paid["paid_tax_czk"])
+    print_row("ZP – předepsané zálohy za rok:", res.ins.zp_annual_prescribed_czk)
+    if paid["paid_zp_czk"] is not None:
+        print_row("ZP – zaplacené zálohy za rok:", paid["paid_zp_czk"])
+    print_row("SP – předepsané zálohy za rok:", res.ins.sp_annual_prescribed_czk)
+    if paid["paid_sp_czk"] is not None:
+        print_row("SP – zaplacené zálohy za rok:", paid["paid_sp_czk"])
+    total_label = "Celkem k doplacení:" if all(value is not None for value in paid.values()) else "Celkem k doplacení (odhad):"
+    print_row_text(total_label, format_settlement(total_settlement))
     print_row("Bonus k výplatě (odečteno):", res.tax.bonus_to_pay_czk)
-    print_row("Čisté zatížení (odvody - bonus):", total_net)
 
 
 @click.group(invoke_without_command=True)
@@ -715,6 +902,9 @@ def _render_calc_output(inp: Inputs, res, year: int, output_format: str) -> None
 @click.option("--par-8-base", type=int, default=None, help="Dílčí základ daně (§8) v Kč.")
 @click.option("--par-9-base", type=int, default=None, help="Dílčí základ daně (§9) v Kč.")
 @click.option("--par-10-base", type=int, default=None, help="Dílčí základ daně (§10) v Kč.")
+@click.option("--paid-tax", type=int, default=None, help="Zaplacené zálohy na daň v Kč za rok.")
+@click.option("--paid-zp", type=int, default=None, help="Zaplacené zálohy na ZP v Kč za rok.")
+@click.option("--paid-sp", type=int, default=None, help="Zaplacené zálohy na SP v Kč za rok.")
 @click.option(
     "--format",
     "output_format",
@@ -738,6 +928,9 @@ def cli(
     par_8_base: int | None,
     par_9_base: int | None,
     par_10_base: int | None,
+    paid_tax: int | None,
+    paid_zp: int | None,
+    paid_sp: int | None,
     output_format: str,
 ) -> None:
     """OSVČ kalkulačka (DPFO + ZP/SP), zjednodušený výpočet."""
@@ -746,7 +939,7 @@ def cli(
     if year is None:
         raise click.UsageError("Chybí --year. Zadej rok výpočtu.")
 
-    inp = _build_inputs(
+    inp, year_defaults, paid = _build_inputs(
         year=year,
         section_7_items=section_7_items,
         presets=presets,
@@ -759,9 +952,12 @@ def cli(
         par_8_base_czk=par_8_base,
         par_9_base_czk=par_9_base,
         par_10_base_czk=par_10_base,
+        paid_tax_czk=paid_tax,
+        paid_zp_czk=paid_zp,
+        paid_sp_czk=paid_sp,
     )
     res = compute(inp)
-    _render_calc_output(inp, res, year, output_format)
+    _render_calc_output(inp, res, year, output_format, year_defaults, paid)
 
 
 @cli.command()
@@ -832,7 +1028,7 @@ def verify(
         if epo.year is None:
             raise SystemExit("Chybí --year a EPO XML nemá rok.")
         year = epo.year
-    inp = _build_inputs(
+    inp, _year_defaults, _paid = _build_inputs(
         year=year,
         section_7_items=section_7_items,
         presets=presets,
@@ -845,6 +1041,9 @@ def verify(
         par_8_base_czk=par_8_base,
         par_9_base_czk=par_9_base,
         par_10_base_czk=par_10_base,
+        paid_tax_czk=None,
+        paid_zp_czk=None,
+        paid_sp_czk=None,
     )
     res = compute(inp)
     diffs = compare_epo_to_calc(epo, inp, res, expected_year=year)

@@ -128,11 +128,13 @@ class InsuranceResults:
     zp_monthly_calc_czk: int
     zp_monthly_payable_czk: int
     zp_annual_payable_czk: int
+    zp_annual_prescribed_czk: int
 
     sp_annual_czk: int
     sp_monthly_calc_czk: int
     sp_monthly_payable_czk: int
     sp_annual_payable_czk: int
+    sp_annual_prescribed_czk: int
 
 
 @dataclass(frozen=True)
@@ -247,17 +249,21 @@ def compute_insurance(inp: Inputs, base_profit_czk: int) -> InsuranceResults:
         zp_annual_min = ceil_czk(D(inp.avg_wage_czk) * inp.zp_min_base_share * inp.zp_rate * D("12"))
         sp_annual_min = ceil_czk(D(inp.avg_wage_czk) * inp.sp_min_base_share * inp.sp_rate * D("12"))
 
-    zp_annual_payable = max(zp_annual_min, zp_annual)
+    zp_annual_payable_base = max(zp_annual_min, zp_annual)
     if inp.activity_type == "secondary" and base_profit_czk <= inp.sp_threshold_secondary_czk:
-        sp_annual_payable = 0
+        sp_annual_payable_base = 0
         min_sp_monthly = 0
     else:
-        sp_annual_payable = max(sp_annual_min, sp_annual)
+        sp_annual_payable_base = max(sp_annual_min, sp_annual)
         min_sp_monthly = ceil_czk(D(sp_annual_min) / D("12"))
 
     min_zp_monthly = ceil_czk(D(zp_annual_min) / D("12")) if zp_annual_min else 0
-    zp_monthly_payable = ceil_czk(D(zp_annual_payable) / D(12)) if zp_annual_payable else 0
-    sp_monthly_payable = ceil_czk(D(sp_annual_payable) / D(12)) if sp_annual_payable else 0
+    zp_monthly_payable = ceil_czk(D(zp_annual_payable_base) / D(12)) if zp_annual_payable_base else 0
+    sp_monthly_payable = ceil_czk(D(sp_annual_payable_base) / D(12)) if sp_annual_payable_base else 0
+    zp_annual_payable = zp_annual_payable_base
+    sp_annual_payable = sp_annual_payable_base
+    zp_annual_prescribed = zp_monthly_payable * 12
+    sp_annual_prescribed = sp_monthly_payable * 12
 
     return InsuranceResults(
         vym_base_czk=zp_vym_base,  # pro ZP/SP máme rozdílný VZ; reportujeme ZP VZ pro přehled
@@ -267,10 +273,12 @@ def compute_insurance(inp: Inputs, base_profit_czk: int) -> InsuranceResults:
         zp_monthly_calc_czk=zp_monthly_calc,
         zp_monthly_payable_czk=zp_monthly_payable,
         zp_annual_payable_czk=zp_annual_payable,
+        zp_annual_prescribed_czk=zp_annual_prescribed,
         sp_annual_czk=sp_annual,
         sp_monthly_calc_czk=sp_monthly_calc,
         sp_monthly_payable_czk=sp_monthly_payable,
         sp_annual_payable_czk=sp_annual_payable,
+        sp_annual_prescribed_czk=sp_annual_prescribed,
     )
 
 

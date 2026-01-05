@@ -4,6 +4,14 @@ Všechny významné změny v tomto projektu budou zaznamenány v tomto souboru.
 ## [Unreleased]
 - (zatim nic)
 
+## [0.8.5] - 2026-01-05
+### Přidáno
+- Volitelné vstupy `--paid-tax`, `--paid-zp`, `--paid-sp` (a `paid_*_czk` v presetech) pro výpočet doplatků z reálně zaplacených záloh.
+- Zobrazení minimálních záloh pro následující rok (`year+1`) ve výstupu.
+
+### Změněno
+- Výstup rozlišuje předepsané vs. zaplacené zálohy.
+
 ## [0.8.0] - 2025-12-29
 ### Přidáno
 - Podpora více §7 položek přes `section_7_items` v CLI i presetech.

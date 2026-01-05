@@ -32,6 +32,8 @@ def test_compute_regression_2025_example():
     assert res.tax.bonus_to_pay_czk == 15_204
     assert res.ins.zp_annual_payable_czk == 37_712
     assert res.ins.sp_annual_payable_czk == 57_098
+    assert res.ins.zp_annual_prescribed_czk == 37_716
+    assert res.ins.sp_annual_prescribed_czk == 57_108
 
 
 def test_child_bonus_ineligible_when_income_below_minimum():
@@ -104,6 +106,23 @@ def test_minimum_monthly_rounding_uses_ceiling():
     assert ins.sp_monthly_payable_czk == 6
     assert ins.zp_annual_payable_czk == 61
     assert ins.sp_annual_payable_czk == 61
+
+
+def test_annual_prescribed_matches_monthly_times_12():
+    inp = Inputs(
+        child_months_by_order=(),
+        min_wage_czk=0,
+        avg_wage_czk=101,
+        zp_rate=Decimal("0.10"),
+        sp_rate=Decimal("0.10"),
+        zp_min_base_share=Decimal("0.50"),
+        sp_min_base_share=Decimal("0.50"),
+    )
+
+    ins = compute_insurance(inp, 0)
+
+    assert ins.zp_annual_prescribed_czk == ins.zp_monthly_payable_czk * 12
+    assert ins.sp_annual_prescribed_czk == ins.sp_monthly_payable_czk * 12
 
 
 def test_minimums_match_official_values_2022_2026():
